@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Données et modèles générés
+data/raw/
+models/*.joblib
+models/*.pkl
+models/*.pickle
+
+# Secrets et configurations locales
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Journaux et fichiers temporaires
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Configuration locale Ansible : ne pas publier
+ansible/ansible.cfg
+ansible/inventory.ini
+
+# Sauvegardes locales
+*.bak
