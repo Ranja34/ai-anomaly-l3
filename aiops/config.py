@@ -20,3 +20,8 @@ MACHINES = {
         if "=" in p
     )
 }
+
+# Accès SSH pour l'investigation et les corrections
+ADRESSES = {nom: ip for ip, nom in MACHINES.items()}
+SSH_CLE = os.path.expanduser(os.getenv("SSH_CLE", "~/.ssh/id_ed25519_ansible"))
+SSH_USER = os.getenv("SSH_USER", "ranja")
