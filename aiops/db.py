@@ -221,3 +221,11 @@ def dernier_appel_ia():
     with connexion() as c:
         ligne = c.execute("SELECT horodatage FROM appels_ia ORDER BY id DESC LIMIT 1").fetchone()
     return ligne[0] if ligne else None
+
+
+def dernier_incident_par_empreinte(empreinte):
+    with connexion() as c:
+        ligne = c.execute(
+            "SELECT * FROM incidents WHERE empreinte = ? ORDER BY cree_le DESC LIMIT 1", (empreinte,)
+        ).fetchone()
+    return dict(ligne) if ligne else None
