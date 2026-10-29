@@ -27,4 +27,4 @@ jobs:
           pip install -r requirements.txt
 
       - name: Check Python syntax
-        run: python -m compileall -q src train_isolation_forest.py
+        run: python -m compileall -q src app.py
