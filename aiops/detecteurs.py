@@ -86,13 +86,13 @@ def _requete_loki(logql):
 def _anomalies_loki(r):
     """Détection par les journaux (sécurité et erreurs critiques). Ne bloque jamais le reste de la détection."""
     fen = r["fenetre_logs"]
-    base = '{job="systemd-journal"}'
+    base = '{job="systemd-journal"} != "org_id=fake"'
     regles = [
-        ("ssh", f'sum by (host) (count_over_time({base} |= "sshd" |~ "Failed password|Invalid user|authentication failure" [{fen}]))',
+        ("ssh", f'sum by (host) (count_over_time({base} |~ "Failed password for|Invalid user|sshd:auth.: authentication failure|maximum authentication attempts" [{fen}]))',
          r["seuil_ssh"], "securite", "haute",
          "Tentatives de connexion SSH suspectes sur {m}",
          "{n} échecs d'authentification SSH sur {m} en {fen} (seuil : {seuil})."),
-        ("sudo", f'sum by (host) (count_over_time({base} |= "sudo" |~ "authentication failure|incorrect password attempts|NOT in sudoers" [{fen}]))',
+        ("sudo", f'sum by (host) (count_over_time({base} |~ "sudo:auth.: authentication failure|incorrect password attempts|NOT in sudoers" [{fen}]))',
          r["seuil_sudo"], "securite", "haute",
          "Échecs d'élévation de privilèges (sudo) sur {m}",
          "{n} échecs sudo sur {m} en {fen} (seuil : {seuil})."),

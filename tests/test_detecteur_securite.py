@@ -43,6 +43,17 @@ class TestDetecteurSecurite(unittest.TestCase):
     def test_loki_injoignable_ne_bloque_rien(self):
         self.assertEqual(self._collecter(erreur=requests.ConnectionError("hors service")), [])
 
+    def test_requetes_loki_ignorent_les_journaux_de_loki(self):
+        vues = []
+        with mock.patch.object(detecteurs, "_requete", return_value=[]), \
+             mock.patch.object(detecteurs, "_sonde_ping", return_value=(0.0, 0.5)), \
+             mock.patch.object(detecteurs, "_requete_loki", side_effect=lambda q: vues.append(q) or []):
+            detecteurs.collecter_anomalies()
+        self.assertEqual(len(vues), 3)
+        for requete in vues:
+            self.assertIn('!= "org_id=fake"', requete)
+        self.assertNotIn('|= "sshd"', vues[0])
+
 
 if __name__ == "__main__":
     unittest.main()
