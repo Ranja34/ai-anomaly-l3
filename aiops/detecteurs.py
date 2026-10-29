@@ -118,6 +118,7 @@ class Detecteur:
         self.r = {**_reglages(), **(reglages or {})}
         self.collecteur = collecteur or (lambda: collecter_anomalies(self.r))
         self.compteurs = {}
+        self.presentes = None
 
     def _en_pause(self, empreinte):
         """Après un refus ou un échec, on n'ouvre pas immédiatement un nouvel incident."""
@@ -131,6 +132,7 @@ class Detecteur:
         """Un passage de détection. Retourne la liste des incidents ouverts pendant ce passage."""
         anomalies = self.collecteur()
         presentes = {a.empreinte for a in anomalies}
+        self.presentes = presentes
 
         for empreinte in list(self.compteurs):
             if empreinte not in presentes:
