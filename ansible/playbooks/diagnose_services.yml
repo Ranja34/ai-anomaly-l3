@@ -1,0 +1,33 @@
+---
+- name: Diagnostic en lecture seule des services du laboratoire
+  hosts: lab
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: Vérifier la connexion SSH
+      ansible.builtin.ping:
+
+    - name: Vérifier le service Node Exporter
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - prometheus-node-exporter
+      register: node_exporter_status
+      changed_when: false
+      failed_when: false
+
+    - name: Vérifier la disponibilité du port SSH
+      ansible.builtin.wait_for:
+        port: 22
+        host: "{{ ansible_host }}"
+        timeout: 5
+      delegate_to: localhost
+      become: false
+
+    - name: Afficher le résultat du diagnostic
+      ansible.builtin.debug:
+        msg:
+          - "Hôte : {{ inventory_hostname }}"
+          - "Node Exporter : {{ node_exporter_status.stdout | default('inconnu') }}"

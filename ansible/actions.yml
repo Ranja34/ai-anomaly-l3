@@ -1,0 +1,68 @@
+---
+# Catalogue des catégories d'actions de l'Agent IA 2.
+# L'exécution sera contrôlée par un validateur humain.
+
+actions:
+  services:
+    description: Gestion des services systemd
+    operations:
+      - status
+      - start
+      - stop
+      - restart
+      - reload
+      - enable
+      - disable
+
+  processes:
+    description: Inspection et gestion des processus
+    operations:
+      - inspect
+      - terminate
+      - restart_service
+
+  packages:
+    description: Gestion des paquets logiciels
+    operations:
+      - inspect
+      - install
+      - upgrade
+      - remove
+
+  files:
+    description: Gestion des fichiers et configurations
+    operations:
+      - inspect
+      - create
+      - modify
+      - backup
+      - restore
+
+  network:
+    description: Diagnostic et gestion réseau
+    operations:
+      - inspect
+      - test_connectivity
+      - inspect_routes
+      - manage_service
+
+  monitoring:
+    description: Supervision Prometheus, Grafana, Loki et Alloy
+    operations:
+      - inspect
+      - restart_service
+      - validate_configuration
+
+  system:
+    description: Diagnostic des ressources système
+    operations:
+      - inspect_cpu
+      - inspect_memory
+      - inspect_disk
+      - inspect_logs
+
+execution_policy:
+  human_approval_required: true
+  approval_per_action: true
+  audit_log_required: true
+  verify_after_execution: true

@@ -42,3 +42,8 @@ ansible/inventory.ini
 
 # Sauvegardes locales
 *.bak
+
+# Données générées à l'exécution (historique, propositions, métriques)
+data/
+ansible/playbooks/proposal_*.yml
+*.bak*
