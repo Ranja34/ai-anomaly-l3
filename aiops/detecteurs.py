@@ -2,6 +2,9 @@
 import argparse
 import math
 import os
+import re
+import socket
+import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -37,6 +40,12 @@ def _reglages():
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
         "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "60")),
+        "conf_reseau_s": int(os.getenv("CONFIRM_RESEAU_S", "60")),
+        "interfaces": os.getenv("RESEAU_INTERFACES", "ens.*|eth.*|enp.*"),
+        "seuil_pertes": float(os.getenv("SEUIL_PERTES_PAQUETS", "5")),
+        "seuil_retrans": float(os.getenv("SEUIL_RETRANS_TCP", "5")),
+        "seuil_perte_ping": float(os.getenv("SEUIL_PERTE_PING", "20")),
+        "seuil_latence_ms": float(os.getenv("SEUIL_LATENCE_MS", "100")),
         "services_ignores": {s.strip() for s in os.getenv("SERVICES_IGNORES", "").split(",") if s.strip()},
     }
 
@@ -57,6 +66,20 @@ def _machine(instance):
 
 def _gravite(valeur):
     return "haute" if valeur >= 95 else "moyenne"
+
+
+def _sonde_ping(ip, n=5):
+    """Ping actif depuis cette machine. Retourne (perte en %, latence moyenne en ms) ou None."""
+    try:
+        p = subprocess.run(["ping", "-c", str(n), "-i", "0.2", "-W", "1", ip],
+                           capture_output=True, text=True, timeout=n * 2 + 5)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    perte = re.search(r"([\d.]+)% packet loss", p.stdout)
+    if not perte:
+        return None
+    rtt = re.search(r"= [\d.]+/([\d.]+)/", p.stdout)
+    return float(perte.group(1)), (float(rtt.group(1)) if rtt else None)
 
 
 def collecter_anomalies(r=None):
@@ -124,6 +147,64 @@ def collecter_anomalies(r=None):
             f"Service {nom} en échec sur {m}",
             f"Le service {nom} est dans l'état « failed » sur {m} (arrêt anormal ou erreur au démarrage).",
             r["conf_service_s"]))
+
+    iface = r["interfaces"]
+    for s in _requete(f'node_network_up{{device=~"{iface}"}} == 0'):
+        inst, dev = s["metric"]["instance"], s["metric"].get("device", "?")
+        m = _machine(inst)
+        anomalies.append(Anomalie(
+            f"reseau:interface:{inst}:{dev}", m, "reseau", "haute",
+            f"Interface réseau {dev} inactive sur {m}",
+            f"L'interface {dev} de {m} n'est pas à l'état « up ».", r["conf_reseau_s"]))
+
+    requete_pertes = (
+        f'sum by (instance, device) (rate(node_network_receive_errs_total{{device=~"{iface}"}}[2m]) + '
+        f'rate(node_network_transmit_errs_total{{device=~"{iface}"}}[2m]) + '
+        f'rate(node_network_receive_drop_total{{device=~"{iface}"}}[2m]) + '
+        f'rate(node_network_transmit_drop_total{{device=~"{iface}"}}[2m]))')
+    for s in _requete(requete_pertes):
+        v = float(s["value"][1])
+        if v > r["seuil_pertes"]:
+            inst, dev = s["metric"]["instance"], s["metric"].get("device", "?")
+            m = _machine(inst)
+            anomalies.append(Anomalie(
+                f"reseau:erreurs:{inst}:{dev}", m, "reseau", "moyenne",
+                f"Erreurs ou pertes de paquets sur l'interface {dev} de {m}",
+                f"{v:.1f} paquets en erreur ou perdus par seconde sur {dev} (seuil : {r['seuil_pertes']:.0f}).",
+                r["conf_reseau_s"]))
+
+    requete_retrans = "100 * rate(node_netstat_Tcp_RetransSegs[2m]) / (rate(node_netstat_Tcp_OutSegs[2m]) > 20)"
+    for s in _requete(requete_retrans):
+        v = float(s["value"][1])
+        if v > r["seuil_retrans"]:
+            inst = s["metric"]["instance"]
+            m = _machine(inst)
+            anomalies.append(Anomalie(
+                f"reseau:retrans:{inst}", m, "reseau", "moyenne",
+                f"Retransmissions TCP élevées sur {m}",
+                f"{v:.1f} % des segments TCP sont retransmis (seuil : {r['seuil_retrans']:.0f} %).",
+                r["conf_reseau_s"]))
+
+    nom_local = socket.gethostname()
+    for ip, nom in config.MACHINES.items():
+        if nom == nom_local:
+            continue
+        mesure = _sonde_ping(ip)
+        if not mesure:
+            continue
+        perte, latence = mesure
+        if r["seuil_perte_ping"] <= perte < 100:
+            anomalies.append(Anomalie(
+                f"reseau:perte:{ip}", nom, "reseau", "haute" if perte >= 50 else "moyenne",
+                f"Perte de paquets réseau vers {nom}",
+                f"Ping de {nom_local} vers {nom} ({ip}) : {perte:.0f} % de paquets perdus "
+                f"(seuil : {r['seuil_perte_ping']:.0f} %).", r["conf_reseau_s"]))
+        if latence is not None and latence > r["seuil_latence_ms"]:
+            anomalies.append(Anomalie(
+                f"reseau:latence:{ip}", nom, "reseau", "moyenne",
+                f"Latence réseau élevée vers {nom}",
+                f"Ping de {nom_local} vers {nom} ({ip}) : latence moyenne de {latence:.0f} ms "
+                f"(seuil : {r['seuil_latence_ms']:.0f} ms).", r["conf_reseau_s"]))
 
     return anomalies
 
