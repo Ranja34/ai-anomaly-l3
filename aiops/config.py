@@ -25,3 +25,5 @@ MACHINES = {
 ADRESSES = {nom: ip for ip, nom in MACHINES.items()}
 SSH_CLE = os.path.expanduser(os.getenv("SSH_CLE", "~/.ssh/id_ed25519_ansible"))
 SSH_USER = os.getenv("SSH_USER", "ranja")
+
+LOKI_URL = os.getenv("LOKI_URL", "http://10.10.0.10:3100").rstrip("/")
