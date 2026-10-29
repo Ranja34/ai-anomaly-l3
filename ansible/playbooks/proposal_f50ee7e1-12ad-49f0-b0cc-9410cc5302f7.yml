@@ -1,0 +1,33 @@
+- name: Ensure Alertmanager service is running and listening
+  hosts: frappe-staging
+  become: true
+  tasks:
+    - name: Enable and start alertmanager service
+      ansible.builtin.service:
+        name: alertmanager
+        state: started
+        enabled: true
+
+    - name: Verify alertmanager is active
+      ansible.builtin.systemd:
+        name: alertmanager
+        state: started
+      register: alert_status
+
+    - name: Check port 9093 listening
+      ansible.builtin.command: ss -ltnp | grep ':9093 '
+      register: ss_result
+      changed_when: false
+      failed_when: ss_result.rc != 0
+
+    - name: Ensure loopback connections are allowed in UFW
+      ansible.builtin.command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: ufw_status.rc != 0
+
+    - name: Verify loopback rule present
+      ansible.builtin.command: echo "${{ ufw_status.stdout }}"
+      register: ufw_output
+      changed_when: false
+      failed_when: ufw_output.stdout.find('Anywhere (loopback)') == -1 and ufw_output.stdout.find('127.0.0.1') == -1

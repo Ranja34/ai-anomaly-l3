@@ -1,0 +1,33 @@
+- hosts: frappe-staging
+  gather_facts: false
+  vars:
+    target_user: myuser
+  tasks:
+    - name: Verify /etc/sudoers exists
+      stat:
+        path: /etc/sudoers
+      register: sudoers_stat
+    - name: Show /etc/sudoers content
+      command: cat /etc/sudoers
+      when: sudoers_stat.stat.exists
+      register: sudoers_content
+    - name: Verify /etc/pam.d/sudo exists
+      stat:
+        path: /etc/pam.d/sudo
+      register: pam_sudo_stat
+    - name: Show /etc/pam.d/sudo content
+      command: cat /etc/pam.d/sudo
+      when: pam_sudo_stat.stat.exists
+      register: pam_sudo_content
+    - name: Check if target user account is locked or expired
+      command: passwd -S {{ target_user }}
+      register: user_status
+    - name: Display user account status
+      debug:
+        var: user_status.stdout
+    - name: Check for PAM tty requirement in sudo configuration
+      shell: grep -n 'pam_tty' /etc/pam.d/sudo || true
+      register: tty_check
+    - name: Show PAM tty requirement lines
+      debug:
+        var: tty_check.stdout_lines
