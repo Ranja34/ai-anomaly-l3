@@ -1,39 +1,75 @@
-"""Agent 1 : enquête en lecture seule (SSH) puis diagnostic par l'IA."""
+"""Agent 1 : enquête libre en lecture seule (commandes écrites par l'IA, en plusieurs tours) puis diagnostic."""
 import argparse
 import json
 import os
 
 from aiops import config, db, llm, ssh
-from aiops.securite import SPECS, CommandeRefusee
+from aiops.securite import CommandeRefusee
 from aiops.temps import formater_local
 
-MAX_ENQUETES = int(os.getenv("AGENT1_MAX_ENQUETES", "1"))
 GRAVITES = ("faible", "moyenne", "haute", "critique")
 
-COMMANDES_STANDARD = {
-    "up": ["systemctl status prometheus-node-exporter --no-pager",
-           "systemctl is-active prometheus-node-exporter",
-           "journalctl -u prometheus-node-exporter -n 30 --no-pager",
-           "ss -tln", "uptime", "free -m", "df -h"],
-    "cpu": ["uptime", "ps aux --sort=-%cpu", "free -m", "journalctl -n 30 -p warning --no-pager"],
-    "ram": ["free -m", "ps aux --sort=-%mem", "journalctl -k -n 30 -p warning --no-pager", "uptime"],
-    "disque": ["df -h", "du -x -h --max-depth=1 /var", "journalctl -n 30 -p warning --no-pager"],
-}
 
-SYSTEME = f"""Tu es un ingénieur système et réseau Linux chargé du DIAGNOSTIC d'incidents dans un petit laboratoire de deux machines.
-Tu réponds UNIQUEMENT par un objet JSON valide, en français, sans texte autour.
-Tu ne proposes aucune correction ici : seulement le diagnostic. Appuie-toi uniquement sur les preuves fournies.
+def _max_tours():
+    return int(os.getenv("AGENT1_MAX_TOURS", "4"))
 
-Si les preuves suffisent :
-{{"action": "conclure", "resume": "2 phrases claires", "gravite": "faible|moyenne|haute|critique",
- "cause_probable": "...", "confiance": "faible|moyenne|haute", "preuves": ["fait observé 1", "fait observé 2"],
- "service_concerne": "nom du service ou null", "machine": "machine concernée",
- "verification_recommandee": "comment vérifier que le problème est réglé"}}
 
-Si elles ne suffisent pas, tu peux demander au plus 2 commandes de lecture seule supplémentaires :
-{{"action": "enqueter", "commandes": [{{"machine": "...", "commande": "..."}}], "raison": "..."}}
-Une commande = un seul programme avec ses options, sans pipe, sans redirection, sans guillemets, sans sudo.
-Programmes autorisés : {", ".join(sorted(SPECS))}."""
+def _systeme(maxi):
+    machines = ", ".join(sorted(config.ADRESSES))
+    return f"""Tu es un ingénieur système, réseau et sécurité Linux chargé du DIAGNOSTIC d'incidents dans un laboratoire de deux machines Ubuntu 22.04 : {machines}.
+Contexte : ufw actif ; nginx et docker installés ; fail2ban sur frappe-staging ; Prometheus, Loki et Grafana sur frappe-staging ; les journaux d'authentification sont dans journalctl (unité ssh) et dans /var/log/auth.log.
+Tu réponds UNIQUEMENT par un objet JSON valide, en français, sans texte autour. Tu ne proposes aucune correction ici : seulement le diagnostic, appuyé sur des preuves.
+
+Pour enquêter, écris toi-même des commandes shell en LECTURE SEULE (au plus 4 par tour, {maxi} tours au total) :
+{{"action": "commandes", "raison": "ce que tu cherches", "commandes": [{{"machine": "...", "commande": "...", "sudo": false}}]}}
+Règles : pipes, grep, awk, sort, head, tail autorisés ; aucune modification (pas de rm, systemctl restart, ufw allow, kill, apt install...) ; aucune redirection vers un fichier ; n'écris pas « sudo » dans la commande : mets "sudo": true si la lecture l'exige (auth.log, ufw status, iptables -L, lastb, fail2ban-client status) ; une seule ligne par commande.
+
+Dès que tu as assez de preuves :
+{{"action": "conclure", "resume": "2 phrases claires", "gravite": "faible|moyenne|haute|critique", "cause_probable": "...", "confiance": "faible|moyenne|haute", "preuves": ["fait observé 1", "fait observé 2"], "service_concerne": "nom du service ou null", "machine": "machine concernée", "verification_recommandee": "comment vérifier que c'est réglé"}}
+Ne conclus jamais que « les logs ne sont pas disponibles » sans avoir essayé journalctl ET une lecture avec sudo. Si l'incident est un faux positif ou ne demande aucune action, dis-le dans le résumé."""
+
+
+def _commandes_standard(inc):
+    """Premier passage sans IA : commandes adaptées au type d'incident. Retourne (machine, commande, sudo)."""
+    machine, source = inc["machine"], inc["source"]
+    nom = inc["empreinte"].rsplit(":", 1)[-1]
+    if source == "up":
+        liste = [("systemctl status prometheus-node-exporter --no-pager", False),
+                 ("systemctl is-active prometheus-node-exporter", False),
+                 ("journalctl -u prometheus-node-exporter -n 30 --no-pager", False),
+                 ("ss -tln", False), ("uptime", False), ("free -m", False), ("df -h", False)]
+    elif source == "cpu":
+        liste = [("uptime", False), ("ps aux --sort=-%cpu | head -n 15", False), ("free -m", False),
+                 ("journalctl -n 30 -p warning --no-pager", False)]
+    elif source == "ram":
+        liste = [("free -m", False), ("ps aux --sort=-%mem | head -n 15", False),
+                 ("journalctl -k -n 30 -p warning --no-pager", False), ("uptime", False)]
+    elif source == "disque":
+        liste = [("df -h", False), ("du -x -h --max-depth=1 /var 2>/dev/null | sort -h | tail -n 10", False),
+                 ("df -i", False), ("journalctl -n 30 -p warning --no-pager", False)]
+    elif source == "service":
+        liste = [(f"systemctl status {nom} --no-pager", False), (f"journalctl -u {nom} -n 40 --no-pager", False),
+                 ("systemctl list-units --failed --no-pager", False)]
+    elif source == "securite" and ":sudo:" in inc["empreinte"]:
+        liste = [('journalctl -n 150 --no-pager | grep -E "sudo" | tail -n 25', False),
+                 ("last -n 15", False), ("who", False)]
+    elif source == "securite":
+        liste = [('journalctl -n 150 --no-pager | grep -E "Failed password|Invalid user" | tail -n 25', False),
+                 ("ss -tn | grep ':22 '", False), ("lastb -n 15", True),
+                 ("ufw status verbose", True), ("fail2ban-client status", True)]
+    elif source == "reseau":
+        liste = [("ip -br a", False), ("ip route", False), ("ip -s link", False), ("ss -s", False),
+                 ("ufw status verbose", True)]
+        autres = [ip for ip, n in config.MACHINES.items() if n != machine]
+        if autres:
+            liste.append((f"ping -c 3 {autres[0]}", False))
+    elif source == "logs":
+        liste = [('journalctl -p err -n 60 --no-pager --since "30 min ago"', False),
+                 ("journalctl -k -n 40 --no-pager", False), ("df -h", False), ("free -m", False)]
+    else:
+        liste = [("uptime", False), ("df -h", False), ("free -m", False),
+                 ("systemctl list-units --failed --no-pager", False)]
+    return [(machine, c, s) for c, s in liste]
 
 
 def _tronquer(texte, commande, lignes=40, caracteres=2500):
@@ -45,12 +81,15 @@ def _tronquer(texte, commande, lignes=40, caracteres=2500):
 
 
 def _executer_liste(commandes):
+    """Exécute des (machine, commande[, sudo]). Une machine injoignable n'est interrogée qu'une fois."""
     preuves, injoignables = [], set()
-    for machine, commande in commandes:
+    for element in commandes:
+        machine, commande = element[0], element[1]
+        sudo = bool(element[2]) if len(element) > 2 else False
         if machine in injoignables:
             continue
         try:
-            res = ssh.executer(machine, commande)
+            res = ssh.executer(machine, commande, sudo)
         except CommandeRefusee as e:
             preuves.append({"machine": machine, "commande": commande, "code": None,
                             "sortie": f"COMMANDE REFUSÉE : {e}"})
@@ -61,6 +100,14 @@ def _executer_liste(commandes):
         preuves.append({"machine": machine, "commande": commande, "code": res["code"],
                         "sortie": _tronquer(res["sortie"], commande)})
     return preuves
+
+
+def _budget(preuves, max_total=9000):
+    """Limite la taille envoyée à l'IA : les anciennes sorties sont raccourcies."""
+    if sum(len(p["sortie"]) for p in preuves) <= max_total:
+        return preuves
+    n = len(preuves)
+    return [{**p, "sortie": p["sortie"][:400] if i < n - 6 else p["sortie"]} for i, p in enumerate(preuves)]
 
 
 def _diagnostic_mock(inc):
@@ -103,25 +150,32 @@ def _normaliser(rep, inc):
 
 
 def _boucle_ia(inc, preuves):
-    for tour in range(MAX_ENQUETES + 1):
-        dernier = tour == MAX_ENQUETES
-        message = {
-            "incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
-                         "gravite_initiale": inc["gravite"]},
-            "preuves": preuves,
-        }
+    maxi = _max_tours()
+    forcer = False
+    for tour in range(1, maxi + 1):
+        dernier = forcer or tour == maxi
+        message = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
+                                "gravite_initiale": inc["gravite"]},
+                   "preuves": _budget(preuves), "tour": f"{tour}/{maxi}"}
         if dernier:
             message["consigne"] = "Tu dois conclure maintenant (action = conclure)."
-        rep = llm.demander_json(SYSTEME, json.dumps(message, ensure_ascii=False),
-                                objet=f"diagnostic {inc['id']}", reponse_mock=_diagnostic_mock(inc))
-        if rep.get("action") == "enqueter" and not dernier:
-            demandes = [(c.get("machine") or inc["machine"], c.get("commande", ""))
-                        for c in (rep.get("commandes") or [])[:2] if isinstance(c, dict)]
+        rep = llm.demander_json(_systeme(maxi), json.dumps(message, ensure_ascii=False),
+                                objet=f"diagnostic {inc['id']} t{tour}", reponse_mock=_diagnostic_mock(inc))
+        if rep.get("action") in ("commandes", "enqueter") and not dernier:
+            demandes = []
+            for c in (rep.get("commandes") or [])[:4]:
+                if isinstance(c, dict) and c.get("commande"):
+                    machine = c.get("machine") if c.get("machine") in config.ADRESSES else inc["machine"]
+                    demandes.append((machine, str(c["commande"]), bool(c.get("sudo"))))
+            if not demandes:
+                forcer = True
+                continue
             nouvelles = _executer_liste(demandes)
             preuves = preuves + nouvelles
+            liste = " ; ".join(d[1] for d in demandes)[:300]
             db.ajouter_evenement(inc["id"], "enquete",
-                                 f"Enquête complémentaire demandée par l'IA : {rep.get('raison', '')}",
-                                 {"preuves": nouvelles})
+                                 f"Enquête complémentaire (tour {tour}/{maxi}) : {rep.get('raison', '')} "
+                                 f"| commandes : {liste}", {"preuves": nouvelles})
             continue
         return _normaliser(rep, inc)
     raise llm.LLMErreur("Le diagnostic n'a pas abouti")
@@ -136,8 +190,7 @@ def diagnostiquer(incident_id):
     db.changer_statut(incident_id, "diagnostic_en_cours",
                       f"Enquête en lecture seule lancée sur {machine}", "enquete")
 
-    commandes = [(machine, c) for c in COMMANDES_STANDARD.get(inc["source"], ["uptime", "df -h", "free -m"])]
-    preuves = _executer_liste(commandes)
+    preuves = _executer_liste(_commandes_standard(inc))
     db.ajouter_evenement(incident_id, "enquete",
                          f"{len(preuves)} commandes en lecture seule exécutées sur {machine}",
                          {"preuves": preuves})
@@ -181,7 +234,7 @@ def main():
         print(json.dumps(diag, ensure_ascii=False, indent=2))
     print("\nChronologie :")
     for e in inc["evenements"]:
-        print(f"  {formater_local(e['horodatage'], False)}  [{e['type']}]  {e['message'][:140]}")
+        print(f"  {formater_local(e['horodatage'], False)}  [{e['type']}]  {e['message'][:160]}")
     print(f"\nAppels IA aujourd'hui : {db.nombre_appels_ia_aujourdhui()}")
 
 
