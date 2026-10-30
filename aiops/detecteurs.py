@@ -293,7 +293,7 @@ class Detecteur:
                 del self.compteurs[empreinte]
 
         for incident in db.lister_incidents(statut="ouvert"):
-            if incident["empreinte"] not in presentes:
+            if incident["source"] != "manuel" and incident["empreinte"] not in presentes:
                 db.changer_statut(incident["id"], "resolu",
                                   "Le problème a disparu de lui-même avant toute intervention", "resolu")
 

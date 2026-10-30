@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIOps · Réseau autonome</title>
+<style>
+:root{--bg:#0a0f1e;--p1:#121a30;--p2:#182240;--bord:#25314f;--txt:#e8edf9;--dim:#8d9ab9;--accent:#5b8cff;--ok:#2ecc8f;--warn:#f5b84b;--bad:#ff5d6c;--info:#4cc3ff;--att:#b388ff}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 600px at 10% -10%,#16224a 0,transparent 60%),var(--bg);color:var(--txt);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;background:rgba(18,26,48,.92);border-bottom:1px solid var(--bord);position:sticky;top:0;z-index:10;flex-wrap:wrap}
+h1{font-size:17px;margin:0;font-weight:700}
+h1 span{color:var(--accent)}
+h2{margin:0;font-size:19px}
+h3{margin:0 0 8px;font-size:14px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.chip{background:var(--p2);border:1px solid var(--bord);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--dim);white-space:nowrap}
+.chip b{color:var(--txt)}
+.pt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--bad)}
+.pt.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+main{display:grid;grid-template-columns:390px 1fr;gap:16px;padding:16px 20px;max-width:1600px;margin:0 auto}
+@media(max-width:950px){main{grid-template-columns:1fr}}
+.card{background:var(--p1);border:1px solid var(--bord);border-radius:14px}
+.liste{display:flex;flex-direction:column;max-height:calc(100vh - 110px);position:sticky;top:76px}
+.onglets{display:flex;gap:4px;padding:10px 10px 0}
+.onglet{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--dim);padding:9px 6px;border-radius:9px 9px 0 0;cursor:pointer;font:inherit;font-weight:600}
+.onglet.actif{color:var(--txt);border-bottom-color:var(--accent);background:var(--p2)}
+.badge{background:var(--att);color:#120a24;border-radius:999px;padding:0 7px;font-size:11px;margin-left:5px;font-weight:700}
+.barre{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--bord);flex-wrap:wrap}
+button.b{background:var(--p2);color:var(--txt);border:1px solid var(--bord);border-radius:9px;padding:7px 13px;cursor:pointer;font:inherit;font-weight:600}
+button.b:hover{border-color:var(--accent)}
+button.prim{background:var(--accent);border-color:var(--accent);color:#fff}
+button.vert{background:var(--ok);border-color:var(--ok);color:#04271a}
+button.rouge{background:transparent;border-color:var(--bad);color:var(--bad)}
+button.rouge:hover{background:var(--bad);color:#fff}
+.items{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:7px}
+.item{display:flex;gap:10px;padding:11px;border:1px solid var(--bord);border-radius:11px;background:var(--p2);cursor:pointer;transition:.15s;align-items:flex-start}
+.item:hover{border-color:var(--accent)}
+.item.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.bande{width:4px;align-self:stretch;border-radius:4px;flex:none;background:var(--c)}
+.item .t{font-weight:600}
+.m{color:var(--dim);font-size:12px;margin-top:2px}
+.s-info{--c:var(--info)}.s-attente{--c:var(--att)}.s-warn{--c:var(--warn)}.s-ok{--c:var(--ok)}.s-bad{--c:var(--bad)}.s-neutre{--c:var(--dim)}
+.g-faible{--c:var(--ok)}.g-moyenne{--c:var(--warn)}.g-haute{--c:#ff8a4c}.g-critique{--c:var(--bad)}
+.tag{display:inline-block;border:1px solid var(--c,var(--dim));color:var(--c,var(--dim));border-radius:999px;padding:0 9px;font-size:11.5px;font-weight:600;margin-right:4px}
+.detail{padding:20px;display:flex;flex-direction:column;gap:16px;min-height:300px}
+.vide{color:var(--dim);text-align:center;padding:80px 20px}
+.bloc{background:var(--p2);border:1px solid var(--bord);border-radius:12px;padding:14px}
+.decision{border-color:var(--att);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(179,136,255,.45)}100%{box-shadow:0 0 0 14px rgba(179,136,255,0)}}
+.actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.alerte{color:var(--warn);font-weight:600;margin:8px 0}
+pre.code{background:#080c18;border:1px solid var(--bord);border-radius:10px;padding:12px;overflow:auto;max-height:340px;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;margin:8px 0 0}
+.ev{display:grid;grid-template-columns:70px 24px 1fr;gap:6px;padding:7px 0;border-bottom:1px solid var(--bord)}
+.ev:last-child{border-bottom:0}
+.heure{color:var(--dim);font:12px ui-monospace,Menlo,monospace;padding-top:2px}
+details summary{cursor:pointer;color:var(--accent);font-size:12px;margin-top:4px}
+ul.preuves{margin:6px 0 0;padding-left:20px}
+dialog{background:var(--p1);color:var(--txt);border:1px solid var(--bord);border-radius:14px;padding:20px;width:min(520px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+textarea,select{width:100%;background:var(--p2);color:var(--txt);border:1px solid var(--bord);border-radius:9px;padding:9px;font:inherit;margin:4px 0 12px}
+#toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{background:var(--p2);border:1px solid var(--bord);border-left:4px solid var(--accent);border-radius:9px;padding:10px 14px;max-width:360px}
+.toast.ok{border-left-color:var(--ok)}.toast.bad{border-left-color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🛰️ AIOps <span>· Réseau autonome</span></h1>
+  <div class="chips">
+    <span class="chip" id="c-orch">…</span><span class="chip" id="c-prom">…</span>
+    <span class="chip" id="c-ia">…</span><span class="chip" id="c-mode">…</span>
+  </div>
+</header>
+<main>
+  <section class="card liste">
+    <div class="onglets">
+      <button class="onglet actif" data-o="encours">En cours <span class="badge" id="n-encours">0</span></button>
+      <button class="onglet" data-o="decider">À décider <span class="badge" id="n-decider">0</span></button>
+      <button class="onglet" data-o="historique">Historique</button>
+    </div>
+    <div class="barre" id="barre"></div>
+    <div class="items" id="items"></div>
+  </section>
+  <section class="card detail" id="detail"><div class="vide">Sélectionnez un incident pour voir son diagnostic, sa chronologie et la correction proposée.</div></section>
+</main>
+<dialog id="dlg">
+  <h2>Signaler un incident</h2>
+  <p class="m">Décrivez le problème : l'IA enquête, propose une correction, puis attend votre accord.</p>
+  <label>Description<textarea id="s-desc" rows="4" placeholder="Ex : le site web ne répond plus sur frappe-staging"></textarea></label>
+  <label>Machine concernée<select id="s-machine"></select></label>
+  <label>Gravité<select id="s-gravite"><option value="faible">faible</option><option value="moyenne" selected>moyenne</option><option value="haute">haute</option><option value="critique">critique</option></select></label>
+  <div class="actions"><button class="b prim" id="s-envoyer">Envoyer à l'IA</button><button class="b" id="s-annuler">Annuler</button></div>
+</dialog>
+<div id="toasts"></div>
+<script>
+const $=s=>document.querySelector(s);
+const ICONES={detecte:'🚨',mesure:'📊',signalement:'🗣️',enquete:'🔎',diagnostic:'🧠',proposition:'📝',securite:'🛡️',decision:'✅',execution:'⚙️',verification:'🔍',resolu:'🎉',echec:'⚠️',escalade:'🆘',erreur:'⚡',erreur_ia:'🤖',info:'ℹ️'};
+const SOURCES={up:'Cible injoignable',cpu:'CPU',ram:'Mémoire',disque:'Disque',service:'Service',reseau:'Réseau',securite:'Sécurité',logs:'Journaux',manuel:'Signalé'};
+let onglet='encours',selection=null,liste=[],machines=[],cochees=new Set(),ouverts=new Set(),sigListe='',sigDetail='';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m,t){const e=document.createElement('div');e.className='toast '+(t||'');e.textContent=m;$('#toasts').appendChild(e);setTimeout(()=>e.remove(),4500)}
+async function api(url,corps,methode){
+  const o={method:methode||(corps===undefined?'GET':'POST'),headers:{'Content-Type':'application/json'}};
+  if(corps!==undefined)o.body=JSON.stringify(corps);
+  const r=await fetch(url,o);let d={};try{d=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(d.erreur||('Erreur '+r.status));return d}
+async function agir(url,msg,corps,methode){
+  try{await api(url,corps===undefined?{}:corps,methode);if(msg)toast(msg,'ok')}catch(e){toast(e.message,'bad')}
+  sigListe='';sigDetail='';tick()}
+
+async function majEtat(){
+  try{const e=await api('/api/etat');machines=e.machines||[];
+    $('#c-orch').innerHTML=`<span class="pt ${e.orchestrateur_ok?'ok':''}"></span>Orchestrateur <b>${e.orchestrateur_ok?'actif':'arrêté'}</b>`;
+    $('#c-prom').innerHTML=`<span class="pt ${e.prometheus==='ok'?'ok':''}"></span>Prometheus <b>${e.prometheus==='ok'?'joignable':(e.prometheus?'injoignable':'—')}</b>`;
+    $('#c-ia').innerHTML=`IA <b>${esc(e.modele)}</b> · ${e.appels_jour}/${e.max_jour} appels · ${e.tokens_jour} tokens`;
+    $('#c-mode').innerHTML=`Mode <b>${esc(e.mode_validation)}</b>`;
+    document.title=(e.a_decider?`(${e.a_decider}) `:'')+'AIOps · Réseau autonome';
+  }catch(x){$('#c-orch').innerHTML='<span class="pt"></span>Interface <b>déconnectée</b>'}}
+
+function filtrer(){
+  if(onglet==='historique')return liste.filter(i=>i.finale);
+  if(onglet==='decider')return liste.filter(i=>!i.finale&&i.a_decision);
+  return liste.filter(i=>!i.finale)}
+function rendreListe(){
+  $('#n-encours').textContent=liste.filter(i=>!i.finale).length;
+  $('#n-decider').textContent=liste.filter(i=>!i.finale&&i.a_decision).length;
+  const f=filtrer();
+  $('#barre').innerHTML=`<button class="b prim" id="b-signaler">➕ Signaler un incident</button>`+
+    (onglet==='historique'?`<button class="b" id="b-tous">Tout sélectionner</button><button class="b rouge" id="b-suppr">Supprimer la sélection (${cochees.size})</button><button class="b rouge" id="b-toutsuppr">Vider l'historique</button>`:'');
+  $('#items').innerHTML=f.length?f.map(i=>`<div class="item s-${i.classe} ${i.id===selection?'sel':''}" data-id="${i.id}">
+    ${onglet==='historique'?`<input type="checkbox" data-coche="${i.id}" ${cochees.has(i.id)?'checked':''}>`:''}
+    <div class="bande"></div><div style="flex:1;min-width:0">
+    <div class="t">${esc(i.titre)}</div>
+    <div class="m">${esc(i.machine)} · ${esc(SOURCES[i.source]||i.source)} · ${esc(i.cree_le)}</div>
+    <div style="margin-top:5px"><span class="tag">${esc(i.statut_libelle)}</span><span class="tag g-${i.gravite}">${esc(i.gravite)}</span>${i.duree?`<span class="m">${esc(i.duree)}</span>`:''}</div>
+    </div></div>`).join(''):`<div class="vide" style="padding:40px 10px">${onglet==='historique'?'Historique vide.':onglet==='decider'?'Aucune décision en attente.':'Aucun incident en cours. Tout va bien ✅'}</div>`}
+
+function rendreDetail(d){
+  const att=d.proposition_attente,diag=d.diagnostic;
+  let h=`<div><h2>${esc(d.titre)}</h2><div class="m" style="margin-top:6px"><span class="tag s-${d.classe}">${esc(d.statut_libelle)}</span><span class="tag g-${d.gravite}">${esc(d.gravite)}</span><span class="tag">${esc(d.machine)}</span><span class="tag">${esc(SOURCES[d.source]||d.source)}</span> Détecté le ${esc(d.cree_le)}${d.duree?' · '+esc(d.duree):''}${d.tentatives?` · tentative ${d.tentatives}/${d.max_tentatives}`:''}</div></div>`;
+  if(att){h+=`<div class="bloc decision"><h3>⏳ Décision requise : correction proposée</h3>
+    <div><span class="tag">${esc(att.type)}</span><span class="tag g-${att.risque==='eleve'?'critique':att.risque==='moyen'?'moyenne':'faible'}">risque ${esc(att.risque)}</span><span class="tag">${esc(att.machine)}</span></div>
+    <p>${esc(att.justification)}</p>${att.sudo_requis?'<div class="alerte">⚠️ Cette correction demande les privilèges administrateur (sudo).</div>':''}
+    <pre class="code">${esc(att.contenu)}</pre>
+    <div class="actions"><button class="b vert" data-act="approuver" data-id="${att.id}">✅ Approuver et exécuter</button><button class="b rouge" data-act="refuser" data-id="${att.id}">✖ Refuser</button></div></div>`}
+  if(d.statut==='verification_manuelle')h+=`<div class="bloc decision"><h3>🔍 Vérifiez le résultat</h3><p>La correction a été exécutée. Le problème est-il réglé ?</p><div class="actions"><button class="b vert" data-act="confirmer" data-id="${d.id}">✅ Oui, résolu</button><button class="b rouge" data-act="infirmer" data-id="${d.id}">✖ Non, toujours présent</button></div></div>`;
+  if(d.statut==='echec_escalade')h+=`<div class="bloc" style="border-color:var(--bad)"><h3>🆘 Intervention humaine requise</h3><p>L'IA n'a pas réussi à résoudre ce problème. Vous pouvez relancer une analyse complète.</p><div class="actions"><button class="b prim" data-act="relancer" data-id="${d.id}">🔄 Relancer l'analyse</button></div></div>`;
+  if(diag)h+=`<div class="bloc"><h3>🧠 Diagnostic de l'IA</h3><p>${esc(diag.resume)}</p><div class="m"><b>Cause probable :</b> ${esc(diag.cause_probable)} · confiance ${esc(diag.confiance||'?')}</div>${(diag.preuves||[]).length?`<ul class="preuves">${diag.preuves.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`:''}${diag.verification_recommandee?`<div class="m" style="margin-top:8px"><b>Vérification recommandée :</b> ${esc(diag.verification_recommandee)}</div>`:''}</div>`;
+  const autres=d.propositions.filter(p=>p.statut!=='en_attente');
+  if(autres.length)h+=`<div class="bloc"><h3>📝 Corrections précédentes</h3>${autres.map(p=>`<details data-ev="p${p.id}" ${ouverts.has('p'+p.id)?'open':''}><summary>Tentative ${p.tentative} · ${esc(p.type)} · ${esc(p.statut)} · code ${p.code_retour??'—'} · ${esc(p.cree_le)}</summary><div class="m">${esc(p.justification)}</div><pre class="code">${esc(p.contenu)}</pre>${p.sortie?`<pre class="code">${esc(p.sortie)}</pre>`:''}</details>`).join('')}</div>`;
+  h+=`<div class="bloc"><h3>🕒 Chronologie détaillée</h3>${d.evenements.map(e=>`<div class="ev"><span class="heure">${esc(e.heure)}</span><span>${ICONES[e.type]||'•'}</span><div>${esc(e.message)}${e.details?`<details data-ev="${e.id}" ${ouverts.has(e.id)?'open':''}><summary>Voir le détail</summary><pre class="code">${esc(e.details)}</pre></details>`:''}</div></div>`).join('')}</div>`;
+  if(d.finale)h+=`<div><button class="b rouge" data-act="supprimer" data-id="${d.id}">🗑️ Supprimer cet incident de l'historique</button></div>`;
+  $('#detail').innerHTML=h}
+
+async function majListe(){
+  try{const l=await api('/api/incidents');const s=JSON.stringify(l);
+    if(s!==sigListe){sigListe=s;liste=l;rendreListe()}}catch(e){}}
+async function majDetail(){
+  if(!selection)return;
+  try{const d=await api('/api/incidents/'+selection);const s=JSON.stringify(d);
+    if(s!==sigDetail){sigDetail=s;rendreDetail(d)}}
+  catch(e){selection=null;sigDetail='';$('#detail').innerHTML='<div class="vide">Incident introuvable (supprimé ?).</div>'}}
+function tick(){majEtat();majListe();majDetail()}
+
+document.addEventListener('click',ev=>{
+  const o=ev.target.closest('.onglet');
+  if(o){onglet=o.dataset.o;document.querySelectorAll('.onglet').forEach(x=>x.classList.toggle('actif',x===o));rendreListe();return}
+  const coche=ev.target.closest('[data-coche]');
+  if(coche){coche.checked?cochees.add(coche.dataset.coche):cochees.delete(coche.dataset.coche);rendreListe();return}
+  const it=ev.target.closest('.item');
+  if(it){selection=it.dataset.id;sigDetail='';rendreListe();majDetail();return}
+  const a=ev.target.closest('[data-act]');
+  if(a){const id=a.dataset.id,act=a.dataset.act;
+    if(act==='approuver')agir(`/api/propositions/${id}/approuver`,'Correction approuvée : exécution en cours');
+    else if(act==='refuser')agir(`/api/propositions/${id}/refuser`,'Correction refusée');
+    else if(act==='confirmer')agir(`/api/incidents/${id}/confirmer`,'Incident résolu');
+    else if(act==='infirmer')agir(`/api/incidents/${id}/infirmer`,'Nouvelle analyse lancée');
+    else if(act==='relancer')agir(`/api/incidents/${id}/relancer`,'Analyse relancée');
+    else if(act==='supprimer'&&confirm('Supprimer définitivement cet incident ?')){selection=null;$('#detail').innerHTML='<div class="vide">Incident supprimé.</div>';agir(`/api/incidents/${id}`,'Incident supprimé',undefined,'DELETE')}
+    return}
+  if(ev.target.id==='b-signaler'){$('#s-machine').innerHTML=machines.map(m=>`<option>${esc(m)}</option>`).join('');$('#dlg').showModal()}
+  else if(ev.target.id==='b-tous'){filtrer().forEach(i=>cochees.add(i.id));rendreListe()}
+  else if(ev.target.id==='b-suppr'&&cochees.size&&confirm(`Supprimer ${cochees.size} incident(s) ?`)){const ids=[...cochees];cochees.clear();agir('/api/historique/supprimer','Sélection supprimée',{ids})}
+  else if(ev.target.id==='b-toutsuppr'&&confirm('Vider tout l\'historique des incidents terminés ?')){cochees.clear();agir('/api/historique/supprimer','Historique vidé',{tout:true})}
+  else if(ev.target.id==='s-annuler')$('#dlg').close();
+  else if(ev.target.id==='s-envoyer'){
+    api('/api/incidents/signaler',{description:$('#s-desc').value,machine:$('#s-machine').value,gravite:$('#s-gravite').value})
+      .then(r=>{$('#dlg').close();$('#s-desc').value='';selection=r.id;onglet='encours';document.querySelectorAll('.onglet').forEach(x=>x.classList.toggle('actif',x.dataset.o==='encours'));toast('Incident transmis à l\'IA','ok');sigListe='';sigDetail='';tick()})
+      .catch(e=>toast(e.message,'bad'))}
+});
+document.addEventListener('toggle',ev=>{const k=ev.target.dataset&&ev.target.dataset.ev;if(!k)return;const id=isNaN(k)?k:Number(k);ev.target.open?ouverts.add(id):ouverts.delete(id)},true);
+tick();setInterval(tick,2000);
+</script>
+</body>
+</html>
