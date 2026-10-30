@@ -3,6 +3,7 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
 from aiops import config
 from aiops.temps import debut_jour_utc, maintenant_utc
@@ -319,3 +320,9 @@ def annuler_propositions_en_attente(incident_id):
         c.execute(
             "UPDATE propositions SET statut = 'annulee', decide_le = ? WHERE incident_id = ? AND statut = 'en_attente'",
             (maintenant_utc(), incident_id))
+
+
+def nombre_appels_ia_depuis(minutes):
+    limite = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    with connexion() as c:
+        return c.execute("SELECT COUNT(*) FROM appels_ia WHERE horodatage >= ?", (limite,)).fetchone()[0]

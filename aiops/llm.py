@@ -26,6 +26,7 @@ def _reglages():
         "url": os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/"),
         "cle": os.getenv("GROQ_API_KEY", ""),
         "max_appels_jour": int(os.getenv("LLM_MAX_APPELS_JOUR", "60")),
+        "max_appels_heure": int(os.getenv("LLM_MAX_APPELS_HEURE", "20")),
         "intervalle_min": float(os.getenv("LLM_INTERVALLE_MIN_S", "5")),
         "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2500")),
         "tentatives": int(os.getenv("LLM_TENTATIVES", "2")),
@@ -91,6 +92,8 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
     for essai in range(1, r["tentatives"] + 2):
         if db.nombre_appels_ia_aujourdhui() >= r["max_appels_jour"]:
             raise QuotaDepasse(f"Limite locale de {r['max_appels_jour']} appels IA par jour atteinte")
+        if db.nombre_appels_ia_depuis(60) >= r["max_appels_heure"]:
+            raise QuotaDepasse(f"Limite de {r['max_appels_heure']} appels IA par heure atteinte")
         _attendre_intervalle(r["intervalle_min"])
 
         try:
