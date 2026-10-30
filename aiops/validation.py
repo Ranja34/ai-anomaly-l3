@@ -42,6 +42,7 @@ REDEMARRAGE = (r"\breboot\b|systemctl\s+(?:reboot|kexec)",
 
 # Mode strict : liste noire complète
 STRICT = [
+    (r"\brm\s+(?:-\S*\s+)*(?:-\w*[rR]\w*|--recursive)(?:\s|$)", "suppression récursive"),
     (r"\bparted\b|\bfdisk\b", "partitionnement de disque"),
     (r"\breboot\b", "redémarrage de la machine"),
     (r"\b(?:passwd|chpasswd|useradd|userdel|usermod|groupadd|visudo)\b|/etc/(?:sudoers|shadow|passwd|group)",
