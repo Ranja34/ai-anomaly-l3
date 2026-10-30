@@ -200,8 +200,13 @@ def diagnostiquer(incident_id):
         db.changer_statut(incident_id, "ouvert", f"Diagnostic IA reporté : {e}", "erreur")
         return None
     except llm.LLMErreur as e:
-        db.changer_statut(incident_id, "echec_escalade",
-                          f"Diagnostic IA impossible : {e}. Intervention humaine requise.", "erreur")
+        if db.compter_evenements(incident_id, "erreur_ia") >= 1:
+            db.changer_statut(incident_id, "echec_escalade",
+                              f"Diagnostic IA impossible après un nouvel essai : {e}. Intervention humaine requise.",
+                              "erreur_ia")
+        else:
+            db.changer_statut(incident_id, "ouvert",
+                              f"Réponse IA inutilisable ({e}). Nouvel essai plus tard.", "erreur_ia")
         return None
 
     db.mettre_a_jour_incident(incident_id, resume=diag["resume"], cause_probable=diag["cause_probable"],

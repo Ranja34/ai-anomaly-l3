@@ -19,6 +19,33 @@ class QuotaDepasse(LLMErreur):
     """Limite d'appels atteinte (locale ou côté fournisseur)."""
 
 
+CONSIGNE_REPONSE = "\n\nRéponds directement par l'objet JSON dans le contenu de ton message. N'appelle aucun outil ni aucune fonction."
+
+
+def _recuperer_appel_outil(rep):
+    """Quand le modèle tente un « appel d'outil », Groq refuse (HTTP 400) mais renvoie sa génération :
+    la réponse JSON voulue s'y trouve souvent. Retourne ce dictionnaire, ou None si inutilisable."""
+    try:
+        generation = rep.json()["error"]["failed_generation"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    try:
+        donnees = extraire_json(generation) if isinstance(generation, str) else generation
+    except LLMErreur:
+        return None
+    if not isinstance(donnees, dict):
+        return None
+    arguments = donnees.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except ValueError:
+            return None
+    if isinstance(arguments, dict) and any(c in arguments for c in ("action", "resume", "type", "contenu")):
+        return arguments
+    return None
+
+
 def _reglages():
     return {
         "fournisseur": os.getenv("LLM_PROVIDER", "mock").lower(),
@@ -76,7 +103,7 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
     corps = {
         "model": r["modele"],
         "messages": [
-            {"role": "system", "content": systeme},
+            {"role": "system", "content": systeme + CONSIGNE_REPONSE},
             {"role": "user", "content": utilisateur},
         ],
         "temperature": 0.2,
@@ -112,6 +139,14 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
             derniere_erreur = f"HTTP {rep.status_code}"
             db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)
             time.sleep(2 * essai)
+            continue
+        if rep.status_code == 400 and "tool_use_failed" in rep.text:
+            recupere = _recuperer_appel_outil(rep)
+            if recupere is not None:
+                db.enregistrer_appel_ia(f, m, objet, True)
+                return recupere
+            derniere_erreur = "le modèle a tenté d'appeler un outil"
+            db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)
             continue
         if rep.status_code != 200:
             db.enregistrer_appel_ia(f, m, objet, False, f"HTTP {rep.status_code}")

@@ -149,7 +149,11 @@ def proposer(incident_id):
             db.changer_statut(incident_id, precedent, f"Rédaction de la correction reportée : {e}", "erreur")
             return None
         except llm.LLMErreur as e:
-            _escalader(incident_id, f"Rédaction de la correction impossible : {e}.")
+            if db.compter_evenements(incident_id, "erreur_ia") >= 1:
+                _escalader(incident_id, f"Rédaction de la correction impossible après un nouvel essai : {e}.")
+            else:
+                db.changer_statut(incident_id, precedent,
+                                  f"Réponse IA inutilisable ({e}). Nouvel essai plus tard.", "erreur_ia")
             return None
         except RuntimeError as e:
             _escalader(incident_id, f"Erreur de configuration : {e}.")
