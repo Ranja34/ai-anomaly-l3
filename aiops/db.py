@@ -102,6 +102,9 @@ def init_db():
     with connexion() as c:
         c.executescript(SCHEMA)
         c.executescript(SCHEMA_ETAT)
+        colonnes = {r["name"] for r in c.execute("PRAGMA table_info(appels_ia)")}
+        if "tokens" not in colonnes:
+            c.execute("ALTER TABLE appels_ia ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0")
 
 
 def _ajouter_evenement(c, incident_id, type_evenement, message, details=None):
@@ -215,11 +218,12 @@ def supprimer_historique():
 
 # ---------- Compteur d'appels IA (jamais effacé par la suppression de l'historique) ----------
 
-def enregistrer_appel_ia(fournisseur, modele, objet, succes, erreur=None):
+def enregistrer_appel_ia(fournisseur, modele, objet, succes, erreur=None, tokens=0):
     with connexion() as c:
         c.execute(
-            "INSERT INTO appels_ia (horodatage, fournisseur, modele, objet, succes, erreur) VALUES (?, ?, ?, ?, ?, ?)",
-            (maintenant_utc(), fournisseur, modele, objet, 1 if succes else 0, erreur),
+            "INSERT INTO appels_ia (horodatage, fournisseur, modele, objet, succes, erreur, tokens) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (maintenant_utc(), fournisseur, modele, objet, 1 if succes else 0, erreur, tokens),
         )
 
 
@@ -332,3 +336,9 @@ def compter_evenements(incident_id, type_evenement):
     with connexion() as c:
         return c.execute("SELECT COUNT(*) FROM evenements WHERE incident_id = ? AND type = ?",
                          (incident_id, type_evenement)).fetchone()[0]
+
+
+def tokens_ia_aujourdhui():
+    with connexion() as c:
+        return c.execute("SELECT COALESCE(SUM(tokens), 0) FROM appels_ia WHERE horodatage >= ?",
+                         (debut_jour_utc(),)).fetchone()[0]
