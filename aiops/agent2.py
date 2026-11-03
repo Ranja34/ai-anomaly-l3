@@ -11,7 +11,7 @@ from aiops import config, db, detecteurs, executeur, llm
 from aiops.securite import masquer_secrets
 from aiops.temps import formater_local
 from aiops import validation
-from aiops.agent1 import _description
+from aiops.agent1 import _compacter, _description
 from aiops.validation import CorrectionRefusee, valider_correction
 
 DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
@@ -57,10 +57,10 @@ def _preuves(inc):
         if e["type"] == "enquete" and e.get("details"):
             try:
                 for p in json.loads(e["details"]).get("preuves", []):
-                    resultat.append({"commande": p.get("commande"), "sortie": (p.get("sortie") or "")[:800]})
+                    resultat.append({"commande": p.get("commande"), "sortie": _compacter(p.get("sortie") or "", 400)})
             except ValueError:
                 continue
-    return resultat[-10:]
+    return resultat[-8:]
 
 
 def _diagnostic(inc):

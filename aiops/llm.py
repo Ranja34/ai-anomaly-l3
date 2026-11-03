@@ -173,9 +173,11 @@ def _attendre_intervalle(minimum, fournisseur=None):
         time.sleep(minimum - ecoule)
 
 
-def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
+def demander_json(systeme, utilisateur, objet="", reponse_mock=None, max_tokens=None):
     """Interroge le modèle et retourne un dict. Lève LLMErreur ou QuotaDepasse."""
     r = _reglages()
+    if max_tokens:
+        r["max_tokens"] = min(int(max_tokens), r["max_tokens"])
     if r["fournisseur"] == "mock":
         return reponse_mock if reponse_mock is not None else {"mock": True}
     if r["fournisseur"] == "groq" and not r["cle"]:

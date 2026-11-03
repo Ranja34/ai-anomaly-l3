@@ -34,11 +34,12 @@ def _reglages():
         "seuil_cpu": float(os.getenv("SEUIL_CPU", "90")),
         "seuil_ram": float(os.getenv("SEUIL_RAM", "90")),
         "seuil_disque": float(os.getenv("SEUIL_DISQUE", "90")),
-        "conf_up_s": int(os.getenv("CONFIRM_UP_S", "40")),
+        "conf_up_s": int(os.getenv("CONFIRM_UP_S", "10")),
         "conf_cpu_s": int(os.getenv("CONFIRM_CPU_S", "60")),
         "conf_ram_s": int(os.getenv("CONFIRM_RAM_S", "60")),
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
+        "fenetre_up": os.getenv("UP_FENETRE", "30s"),
         "cooldown_escalade_s": int(os.getenv("DETECT_COOLDOWN_ESCALADE_S", "3600")),
         "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "40")),
         "conf_reseau_s": int(os.getenv("CONFIRM_RESEAU_S", "40")),
@@ -142,7 +143,7 @@ def collecter_anomalies(r=None):
     r = r or _reglages()
     anomalies = []
 
-    for s in _requete('up{instance=~".*:9100"}'):
+    for s in _requete(f'max_over_time(up{{instance=~".*:9100"}}[{r["fenetre_up"]}])'):
         if float(s["value"][1]) == 0:
             inst = s["metric"]["instance"]
             m = _machine(inst)
