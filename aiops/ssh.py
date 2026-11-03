@@ -13,6 +13,7 @@ def executer(machine, commande, sudo=False, timeout=25):
         return {"ok": False, "code": None, "sortie": f"machine inconnue : {machine}", "injoignable": False}
     cmd = ["ssh", "-i", config.SSH_CLE, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
            "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes",
+           "-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/aiops-ssh-%C", "-o", "ControlPersist=60",
            f"{config.SSH_USER}@{hote}", "sudo -n bash -s" if sudo else "bash -s"]
     try:
         p = subprocess.run(cmd, input=commande.strip() + "\n", capture_output=True, text=True, timeout=timeout)

@@ -30,18 +30,18 @@ class Anomalie:
 
 def _reglages():
     return {
-        "intervalle": int(os.getenv("DETECT_INTERVALLE_S", "30")),
+        "intervalle": int(os.getenv("DETECT_INTERVALLE_S", "10")),
         "seuil_cpu": float(os.getenv("SEUIL_CPU", "90")),
         "seuil_ram": float(os.getenv("SEUIL_RAM", "90")),
         "seuil_disque": float(os.getenv("SEUIL_DISQUE", "90")),
-        "conf_up_s": int(os.getenv("CONFIRM_UP_S", "60")),
-        "conf_cpu_s": int(os.getenv("CONFIRM_CPU_S", "120")),
-        "conf_ram_s": int(os.getenv("CONFIRM_RAM_S", "120")),
+        "conf_up_s": int(os.getenv("CONFIRM_UP_S", "40")),
+        "conf_cpu_s": int(os.getenv("CONFIRM_CPU_S", "60")),
+        "conf_ram_s": int(os.getenv("CONFIRM_RAM_S", "60")),
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
         "cooldown_escalade_s": int(os.getenv("DETECT_COOLDOWN_ESCALADE_S", "3600")),
-        "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "60")),
-        "conf_reseau_s": int(os.getenv("CONFIRM_RESEAU_S", "60")),
+        "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "40")),
+        "conf_reseau_s": int(os.getenv("CONFIRM_RESEAU_S", "40")),
         "interfaces": os.getenv("RESEAU_INTERFACES", "ens.*|eth.*|enp.*"),
         "seuil_pertes": float(os.getenv("SEUIL_PERTES_PAQUETS", "5")),
         "seuil_retrans": float(os.getenv("SEUIL_RETRANS_TCP", "5")),
@@ -153,7 +153,7 @@ def collecter_anomalies(r=None):
                 "le service est arrêté ou la machine est inaccessible.",
                 r["conf_up_s"]))
 
-    requete_cpu = '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100)'
+    requete_cpu = '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)'
     for s in _requete(requete_cpu):
         v = float(s["value"][1])
         if v > r["seuil_cpu"]:

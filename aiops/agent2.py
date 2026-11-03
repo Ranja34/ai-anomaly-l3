@@ -164,6 +164,9 @@ def proposer(incident_id):
         _escalader(incident_id, f"Aucune correction acceptable après contrôle ({erreur}).")
         return None
 
+    actuel = db.get_incident(incident_id)
+    if not actuel or actuel["statut"] in db.STATUTS_FINAUX:
+        return None
     proposition_id = db.creer_proposition(incident_id, tentative, prop["machine"], prop["type"], prop["contenu"],
                                           prop["sudo_requis"], prop["justification"], prop["risque"])
     db.mettre_a_jour_incident(incident_id, tentatives=tentative)

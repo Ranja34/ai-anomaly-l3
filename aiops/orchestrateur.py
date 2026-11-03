@@ -1,6 +1,8 @@
-"""Orchestrateur : service permanent qui détecte, diagnostique, propose, exécute les corrections approuvées et vérifie."""
+"""Orchestrateur : trois fils indépendants (détection, IA, exécution) qui détectent, diagnostiquent,
+proposent, exécutent les corrections approuvées et vérifient le rétablissement."""
 import os
 import signal
+import threading
 import time
 import traceback
 
@@ -22,6 +24,7 @@ class Orchestrateur:
         self.pause_ia_s = int(os.getenv("IA_PAUSE_QUOTA_S", "120"))
         self.pause_ia_jusqua = 0.0
         self.erreurs = {}
+        self.verrou = threading.Lock()
         self.arret = False
 
     # ----- Reprise après un arrêt brutal ou un redémarrage -----
@@ -47,8 +50,8 @@ class Orchestrateur:
                     db.changer_statut(iid, "nouvelle_tentative",
                                       "Exécution interrompue par un redémarrage du service : nouvelle analyse", "info")
 
-    # ----- Un passage complet -----
-    def cycle(self):
+    # ----- Fil 1 : détection (jamais bloquée par l'IA) -----
+    def detecter(self):
         db.set_etat("battement", maintenant_utc())
         detection_ok = True
         try:
@@ -61,7 +64,6 @@ class Orchestrateur:
             journal(f"Prometheus injoignable ou réponse invalide : {e}")
         if detection_ok:
             self._cloturer_obsoletes()
-        self._traiter()
 
     def _cloturer_obsoletes(self):
         """Un problème qui a disparu avant la fin du traitement est clos automatiquement."""
@@ -77,15 +79,25 @@ class Orchestrateur:
                                       "(rétablissement hors procédure)", "resolu")
                     journal(f"Incident {inc['id']} clos : le problème a disparu de lui-même")
 
+    # ----- Utilisé par les tests : un passage complet, dans un seul fil -----
+    def cycle(self):
+        self.detecter()
+        self._traiter()
+
     def _traiter(self):
-        # 1. Exécuter les corrections approuvées (ne consomme aucun appel IA)
+        self._traiter_executions()
+        self._traiter_ia()
+
+    # ----- Fil 3 : exécution des corrections approuvées (aucun appel IA) -----
+    def _traiter_executions(self):
         for prop in db.propositions_par_statut("approuvee"):
             journal(f"Exécution de la correction {prop['id']} (incident {prop['incident_id']}) sur {prop['machine']}")
             resultat = self._securise(prop["incident_id"], lambda p=prop: agent2.executer_approuvee(p["id"]))
             if resultat:
                 journal(f"Incident {prop['incident_id']} : {resultat}")
 
-        # 2. Étapes qui utilisent l'IA (suspendues si le quota est atteint)
+    # ----- Fil 2 : étapes qui utilisent l'IA (suspendues si le quota est atteint) -----
+    def _traiter_ia(self):
         if time.monotonic() < self.pause_ia_jusqua:
             return
         for inc in reversed(db.lister_incidents(statut="ouvert")):
@@ -112,7 +124,8 @@ class Orchestrateur:
         try:
             return fonction()
         except Exception as e:  # une erreur sur un incident ne doit jamais arrêter le service
-            n = self.erreurs[incident_id] = self.erreurs.get(incident_id, 0) + 1
+            with self.verrou:
+                n = self.erreurs[incident_id] = self.erreurs.get(incident_id, 0) + 1
             journal(f"Erreur interne sur l'incident {incident_id} ({n}/3) : {type(e).__name__}: {e}")
             traceback.print_exc()
             if n >= 3:
@@ -122,6 +135,18 @@ class Orchestrateur:
             return None
 
 
+def _boucle(orchestrateur, fonction, intervalle, nom):
+    while not orchestrateur.arret:
+        debut = time.monotonic()
+        try:
+            fonction()
+        except Exception as e:
+            journal(f"Erreur inattendue dans le fil « {nom} » : {type(e).__name__}: {e}")
+            traceback.print_exc()
+        while not orchestrateur.arret and time.monotonic() - debut < intervalle:
+            time.sleep(0.5)
+
+
 def main():
     db.init_db()
     orchestrateur = Orchestrateur()
@@ -129,19 +154,21 @@ def main():
         signal.signal(signal_arret, lambda *_: setattr(orchestrateur, "arret", True))
 
     r = llm._reglages()
-    journal(f"Orchestrateur démarré (moteur IA : {r['fournisseur']}, modèle : {r['modele']}, "
-            f"quota : {r['max_appels_jour']} appels/jour)")
-    orchestrateur.reprise()
     intervalle = orchestrateur.detecteur.r["intervalle"]
+    journal(f"Orchestrateur démarré (moteur IA : {r['fournisseur']}, modèle : {r['modele']}) ; "
+            f"détection toutes les {intervalle} s, IA et exécutions surveillées chaque seconde")
+    orchestrateur.reprise()
+    taches = (("détection", orchestrateur.detecter, intervalle),
+              ("ia", orchestrateur._traiter_ia, 1),
+              ("exécution", orchestrateur._traiter_executions, 1))
+    fils = [threading.Thread(target=_boucle, args=(orchestrateur, f, i, n), name=n, daemon=True)
+            for n, f, i in taches]
+    for fil in fils:
+        fil.start()
     while not orchestrateur.arret:
-        debut = time.monotonic()
-        try:
-            orchestrateur.cycle()
-        except Exception as e:
-            journal(f"Erreur inattendue dans le cycle : {type(e).__name__}: {e}")
-            traceback.print_exc()
-        while not orchestrateur.arret and time.monotonic() - debut < intervalle:
-            time.sleep(1)
+        time.sleep(1)
+    for fil in fils:
+        fil.join(timeout=50)
     journal("Orchestrateur arrêté proprement")
 
 
