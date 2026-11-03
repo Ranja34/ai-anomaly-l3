@@ -137,7 +137,7 @@ def _reglages_env():
         "cle": os.getenv("GROQ_API_KEY", ""),
         "max_appels_jour": int(os.getenv("LLM_MAX_APPELS_JOUR", "60")),
         "max_appels_heure": int(os.getenv("LLM_MAX_APPELS_HEURE", "20")),
-        "intervalle_min": float(os.getenv("LLM_INTERVALLE_MIN_S", "5")),
+        "intervalle_min": float(os.getenv("LLM_INTERVALLE_MIN_S", "1")),
         "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2500")),
         "tentatives": int(os.getenv("LLM_TENTATIVES", "2")),
         "effort": os.getenv("LLM_REASONING_EFFORT", "low"),
