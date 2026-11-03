@@ -342,3 +342,21 @@ def tokens_ia_aujourdhui():
     with connexion() as c:
         return c.execute("SELECT COALESCE(SUM(tokens), 0) FROM appels_ia WHERE horodatage >= ?",
                          (debut_jour_utc(),)).fetchone()[0]
+
+
+def appels_ia_fournisseur(fournisseur, minutes=None):
+    """Nombre d'appels IA d'un fournisseur : aujourd'hui, ou durant les N dernières minutes."""
+    if minutes is None:
+        depuis = debut_jour_utc()
+    else:
+        depuis = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    with connexion() as c:
+        return c.execute("SELECT COUNT(*) FROM appels_ia WHERE fournisseur = ? AND horodatage >= ?",
+                         (fournisseur, depuis)).fetchone()[0]
+
+
+def dernier_appel_ia_fournisseur(fournisseur):
+    with connexion() as c:
+        ligne = c.execute("SELECT horodatage FROM appels_ia WHERE fournisseur = ? ORDER BY id DESC LIMIT 1",
+                          (fournisseur,)).fetchone()
+    return ligne[0] if ligne else None

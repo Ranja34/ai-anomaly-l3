@@ -107,7 +107,7 @@ def api_etat():
         "orchestrateur_ok": age is not None and age < 300, "age_battement": age,
         "prometheus": prometheus["valeur"] if prometheus else None,
         "fournisseur": r["fournisseur"], "modele": r["modele"], "moteur": r["fournisseur"], "moteurs": _moteurs(),
-        "appels_jour": db.nombre_appels_ia_aujourdhui(), "max_jour": None if r["fournisseur"] == "ollama" else r["max_appels_jour"],
+        "appels_jour": db.appels_ia_fournisseur(r["fournisseur"]), "max_jour": None if r["fournisseur"] == "ollama" else r["max_appels_jour"],
         "tokens_jour": db.tokens_ia_aujourdhui(), "mode_validation": validation.mode(),
         "actifs": sum(1 for i in incidents if i["statut"] not in db.STATUTS_FINAUX),
         "a_decider": sum(1 for i in incidents if i["id"] in attente or i["statut"] == "verification_manuelle"),
