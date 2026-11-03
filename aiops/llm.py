@@ -100,7 +100,36 @@ def _attendre_jetons(besoin):
     time.sleep(min(60.0, (besoin - disponible) / debit + 0.5))
 
 
+MOTEURS = ("groq", "ollama", "mock")
+
+
+def moteur_choisi():
+    """Moteur IA actif : choix fait depuis l'interface (base de données), sinon variable LLM_PROVIDER."""
+    try:
+        etat = db.get_etat("moteur_ia")
+    except Exception:
+        etat = None
+    if etat and etat["valeur"] in MOTEURS:
+        return etat["valeur"]
+    return os.getenv("LLM_PROVIDER", "mock").lower()
+
+
 def _reglages():
+    r = _reglages_env()
+    r["fournisseur"] = moteur_choisi()
+    if r["fournisseur"] == "ollama":
+        r.update({
+            "modele": os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+            "url": os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1").rstrip("/"),
+            "cle": "",
+            "max_appels_jour": 10 ** 9, "max_appels_heure": 10 ** 9, "intervalle_min": 0.0,
+            "timeout": int(os.getenv("OLLAMA_TIMEOUT_S", "300")),
+            "mode_json": os.getenv("LLM_JSON_MODE", "true").lower() in ("1", "true", "oui"),
+        })
+    return r
+
+
+def _reglages_env():
     return {
         "fournisseur": os.getenv("LLM_PROVIDER", "mock").lower(),
         "modele": os.getenv("LLM_MODEL", "openai/gpt-oss-20b"),
@@ -177,7 +206,8 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
         if db.nombre_appels_ia_depuis(60) >= r["max_appels_heure"]:
             raise QuotaDepasse(f"Limite de {r['max_appels_heure']} appels IA par heure atteinte")
         _attendre_intervalle(r["intervalle_min"])
-        _attendre_jetons((len(systeme) + len(utilisateur)) / 3 + r["max_tokens"])
+        if r["fournisseur"] == "groq":
+            _attendre_jetons((len(systeme) + len(utilisateur)) / 3 + r["max_tokens"])
 
         try:
             rep = requests.post(f"{r['url']}/chat/completions", headers=entetes,

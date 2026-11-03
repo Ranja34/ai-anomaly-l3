@@ -1,6 +1,7 @@
 """Interface web en français : incidents en direct, décisions, historique."""
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -84,6 +85,14 @@ def accueil():
     return app.send_static_file("index.html")
 
 
+def _moteurs():
+    return [
+        {"id": "groq", "libelle": f"Groq · {os.getenv('LLM_MODEL', 'openai/gpt-oss-20b')}"},
+        {"id": "ollama", "libelle": f"Ollama local · {os.getenv('OLLAMA_MODEL', 'llama3.2:3b')}"},
+        {"id": "mock", "libelle": "Simulation (aucun appel)"},
+    ]
+
+
 @app.get("/api/etat")
 def api_etat():
     battement = db.get_etat("battement")
@@ -97,8 +106,8 @@ def api_etat():
     return jsonify({
         "orchestrateur_ok": age is not None and age < 300, "age_battement": age,
         "prometheus": prometheus["valeur"] if prometheus else None,
-        "fournisseur": r["fournisseur"], "modele": r["modele"],
-        "appels_jour": db.nombre_appels_ia_aujourdhui(), "max_jour": r["max_appels_jour"],
+        "fournisseur": r["fournisseur"], "modele": r["modele"], "moteur": r["fournisseur"], "moteurs": _moteurs(),
+        "appels_jour": db.nombre_appels_ia_aujourdhui(), "max_jour": None if r["fournisseur"] == "ollama" else r["max_appels_jour"],
         "tokens_jour": db.tokens_ia_aujourdhui(), "mode_validation": validation.mode(),
         "actifs": sum(1 for i in incidents if i["statut"] not in db.STATUTS_FINAUX),
         "a_decider": sum(1 for i in incidents if i["id"] in attente or i["statut"] == "verification_manuelle"),
@@ -219,6 +228,29 @@ def api_historique_supprimer():
     else:
         n = sum(1 for i in d.get("ids", []) if db.supprimer_incident(str(i)))
     return jsonify({"supprimes": n})
+
+
+@app.post("/api/moteur")
+def api_moteur():
+    choix = (request.get_json(silent=True) or {}).get("moteur")
+    if choix not in llm.MOTEURS:
+        return jsonify({"erreur": "Moteur inconnu"}), 400
+    db.set_etat("moteur_ia", choix)
+    info = next(m for m in _moteurs() if m["id"] == choix)
+    return jsonify({"ok": True, "moteur": choix, "libelle": info["libelle"]})
+
+
+@app.post("/api/moteur/tester")
+def api_moteur_tester():
+    r = llm._reglages()
+    debut = time.monotonic()
+    try:
+        rep = llm.demander_json("Tu réponds uniquement en JSON.", 'Réponds exactement avec {"statut": "ok"}',
+                                "test du moteur", reponse_mock={"statut": "ok"})
+    except llm.LLMErreur as e:
+        return jsonify({"erreur": f"Le moteur {r['fournisseur']} ne répond pas : {e}"}), 502
+    return jsonify({"ok": True, "moteur": r["fournisseur"], "modele": r["modele"],
+                    "duree_s": round(time.monotonic() - debut, 1), "reponse": rep})
 
 
 def main():

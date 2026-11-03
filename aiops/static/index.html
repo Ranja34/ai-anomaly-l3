@@ -59,6 +59,7 @@ ul.preuves{margin:6px 0 0;padding-left:20px}
 dialog{background:var(--p1);color:var(--txt);border:1px solid var(--bord);border-radius:14px;padding:20px;width:min(520px,92vw)}
 dialog::backdrop{background:rgba(0,0,0,.6)}
 textarea,select{width:100%;background:var(--p2);color:var(--txt);border:1px solid var(--bord);border-radius:9px;padding:9px;font:inherit;margin:4px 0 12px}
+#moteur{width:auto;margin:0 4px;padding:2px 6px}
 #toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
 .toast{background:var(--p2);border:1px solid var(--bord);border-left:4px solid var(--accent);border-radius:9px;padding:10px 14px;max-width:360px}
 .toast.ok{border-left-color:var(--ok)}.toast.bad{border-left-color:var(--bad)}
@@ -69,7 +70,7 @@ textarea,select{width:100%;background:var(--p2);color:var(--txt);border:1px soli
   <h1>🛰️ AIOps <span>· Réseau autonome</span></h1>
   <div class="chips">
     <span class="chip" id="c-orch">…</span><span class="chip" id="c-prom">…</span>
-    <span class="chip" id="c-ia">…</span><span class="chip" id="c-mode">…</span>
+    <span class="chip" id="c-moteur">Moteur IA <select id="moteur"></select><button class="b" id="b-tester" style="padding:2px 9px">Tester</button></span><span class="chip" id="c-ia">…</span><span class="chip" id="c-mode">…</span>
   </div>
 </header>
 <main>
@@ -113,8 +114,10 @@ async function majEtat(){
   try{const e=await api('/api/etat');machines=e.machines||[];
     $('#c-orch').innerHTML=`<span class="pt ${e.orchestrateur_ok?'ok':''}"></span>Orchestrateur <b>${e.orchestrateur_ok?'actif':'arrêté'}</b>`;
     $('#c-prom').innerHTML=`<span class="pt ${e.prometheus==='ok'?'ok':''}"></span>Prometheus <b>${e.prometheus==='ok'?'joignable':(e.prometheus?'injoignable':'—')}</b>`;
-    $('#c-ia').innerHTML=`IA <b>${esc(e.modele)}</b> · ${e.appels_jour}/${e.max_jour} appels · ${e.tokens_jour} tokens`;
+    $('#c-ia').innerHTML=`IA <b>${esc(e.modele)}</b> · ${e.appels_jour}/${e.max_jour??'∞'} appels · ${e.tokens_jour} tokens`;
     $('#c-mode').innerHTML=`Mode <b>${esc(e.mode_validation)}</b>`;
+    const sel=$('#moteur');
+    if(sel&&document.activeElement!==sel){const h=(e.moteurs||[]).map(m=>`<option value="${m.id}" ${m.id===e.moteur?'selected':''}>${esc(m.libelle)}</option>`).join('');if(sel.innerHTML!==h)sel.innerHTML=h}
     document.title=(e.a_decider?`(${e.a_decider}) `:'')+'AIOps · Réseau autonome';
   }catch(x){$('#c-orch').innerHTML='<span class="pt"></span>Interface <b>déconnectée</b>'}}
 
@@ -190,6 +193,8 @@ document.addEventListener('click',ev=>{
       .catch(e=>toast(e.message,'bad'))}
 });
 document.addEventListener('toggle',ev=>{const k=ev.target.dataset&&ev.target.dataset.ev;if(!k)return;const id=isNaN(k)?k:Number(k);ev.target.open?ouverts.add(id):ouverts.delete(id)},true);
+document.addEventListener('change',ev=>{if(ev.target.id==='moteur')api('/api/moteur',{moteur:ev.target.value}).then(r=>{toast('Moteur IA : '+r.libelle,'ok');tick()}).catch(e=>toast(e.message,'bad'))});
+document.addEventListener('click',ev=>{if(ev.target.id==='b-tester'){const b=ev.target;b.disabled=true;b.textContent='Test…';api('/api/moteur/tester',{}).then(r=>toast(`✓ ${r.moteur} (${r.modele}) a répondu en ${r.duree_s} s`,'ok')).catch(e=>toast(e.message,'bad')).finally(()=>{b.disabled=false;b.textContent='Tester';tick()})}});
 tick();setInterval(tick,2000);
 </script>
 </body>
