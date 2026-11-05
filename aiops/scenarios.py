@@ -37,14 +37,15 @@ rm -f /tmp/aiops_demo_nginx_etat
 DISQUE_INJECTION = """set -e
 mkdir -p /srv/demo-disque
 if ! mountpoint -q /srv/demo-disque; then
-  fallocate -l 300M /var/tmp/demo-disque.img
-  mkfs.ext4 -q -F -m 0 /var/tmp/demo-disque.img
-  mount -o loop /var/tmp/demo-disque.img /srv/demo-disque
+  fallocate -l 120M /dev/shm/demo-disque.img
+  mkfs.ext4 -q -F -m 0 /dev/shm/demo-disque.img
+  mount -o loop /dev/shm/demo-disque.img /srv/demo-disque
 fi
-fallocate -l 270M /srv/demo-disque/journal_applicatif_enorme.log
+LIBRE=$(df -BM --output=avail /srv/demo-disque | tail -n 1 | tr -dc 0-9)
+fallocate -l $((LIBRE - 6))M /srv/demo-disque/journal_applicatif_enorme.log
 """
 DISQUE_NETTOYAGE = """umount /srv/demo-disque 2>/dev/null || umount -l /srv/demo-disque 2>/dev/null || true
-rm -f /var/tmp/demo-disque.img
+rm -f /dev/shm/demo-disque.img /var/tmp/demo-disque.img
 rmdir /srv/demo-disque 2>/dev/null || true
 """
 CPU_INJECTION = "for i in 1 2; do setsid -f timeout 900 yes > /dev/null 2>&1 < /dev/null; done\n"
