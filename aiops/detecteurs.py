@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import requests
 
 from aiops import config, db
+from aiops import sondes as sondes_mod
 from aiops.temps import formater_local, maintenant_utc
 
 FS_EXCLUS = "tmpfs|overlay|squashfs|ramfs|devtmpfs"
@@ -40,6 +41,7 @@ def _reglages():
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
         "fenetre_up": os.getenv("UP_FENETRE", "30s"),
+        "conf_sonde_s": int(os.getenv("CONFIRM_SONDE_S", "20")),
         "cooldown_escalade_s": int(os.getenv("DETECT_COOLDOWN_ESCALADE_S", "3600")),
         "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "40")),
         "conf_reseau_s": int(os.getenv("CONFIRM_RESEAU_S", "40")),
@@ -121,6 +123,43 @@ def _anomalies_loki(r):
     if not _ETAT_LOKI["ok"]:
         print("Loki de nouveau joignable : détection par les journaux rétablie", flush=True)
     _ETAT_LOKI["ok"] = True
+    return anomalies
+
+
+_ETAT_SONDES = {"ok": True}
+
+
+def _anomalies_sondes(r):
+    """Sondes de disponibilité (ports et pages web). Ne bloque jamais le reste de la détection."""
+    try:
+        sondes = sondes_mod.charger()
+        _ETAT_SONDES["ok"] = True
+    except Exception as e:  # configuration invalide : signalée une fois, la détection continue
+        if _ETAT_SONDES["ok"]:
+            print(f"Sondes ignorées (fichier invalide) : {e}", flush=True)
+        _ETAT_SONDES["ok"] = False
+        return []
+    par_machine = {}
+    for sonde, ok, detail, _ms in sondes_mod.executer_toutes(sondes):
+        par_machine.setdefault(sonde.machine, []).append((sonde, ok, detail))
+    anomalies = []
+    local = socket.gethostname()
+    for machine, liste in par_machine.items():
+        echecs = [x for x in liste if not x[1]]
+        if not echecs:
+            continue
+        if len(liste) >= 2 and len(echecs) == len(liste):
+            resume = " ; ".join(f"{s.libelle()} : {d}" for s, _, d in echecs)
+            anomalies.append(Anomalie(
+                f"sonde:{machine}:toutes", machine, "sonde", "haute",
+                f"Machine {machine} injoignable (toutes les sondes échouent)",
+                f"Aucune sonde ne répond depuis {local} : {resume}.", r["conf_sonde_s"]))
+            continue
+        for sonde, _, detail in echecs:
+            anomalies.append(Anomalie(
+                f"sonde:{machine}:{sonde.type}:{sonde.port}", machine, "sonde", "haute",
+                f"Sonde « {sonde.libelle()} » en échec sur {machine}",
+                f"Sonde {sonde.libelle()} depuis {local} : {detail}.", r["conf_sonde_s"]))
     return anomalies
 
 
@@ -263,6 +302,10 @@ def collecter_anomalies(r=None):
                 f"(seuil : {r['seuil_latence_ms']:.0f} ms).", r["conf_reseau_s"]))
 
     anomalies.extend(_anomalies_loki(r))
+    anomalies.extend(_anomalies_sondes(r))
+    # Corrélation : une machine déjà signalée en échec (cible ou service) n'ouvre pas aussi un incident de sonde
+    pannes = {a.machine for a in anomalies if a.source in ("up", "service")}
+    anomalies = [a for a in anomalies if not (a.source == "sonde" and a.machine in pannes)]
 
     return anomalies
 

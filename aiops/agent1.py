@@ -64,6 +64,18 @@ def _commandes_standard(inc):
         autres = [ip for ip, n in config.MACHINES.items() if n != machine]
         if autres:
             liste.append((f"ping -c 3 {autres[0]}", False))
+    elif source == "sonde":
+        morceaux = inc["empreinte"].split(":")
+        port = morceaux[3] if len(morceaux) > 3 and morceaux[3].isdigit() else None
+        if port:
+            liste = [(f"ss -tlnp | grep ':{port} '", True), ("ufw status verbose", True), ("iptables -S", True),
+                     ("systemctl list-units --failed --no-pager", False),
+                     ("systemctl list-units --type=service --state=running --no-pager", False),
+                     (f"curl -sI -m 3 http://127.0.0.1:{port}/", False),
+                     ("journalctl -n 40 -p warning --no-pager", False)]
+        else:
+            liste = [("uptime", False), ("ip -br a", False), ("ss -tln", False), ("ufw status verbose", True),
+                     ("systemctl list-units --failed --no-pager", False)]
     elif source == "logs":
         liste = [('journalctl -p err -n 60 --no-pager --since "30 min ago"', False),
                  ("journalctl -k -n 40 --no-pager", False), ("df -h", False), ("free -m", False)]

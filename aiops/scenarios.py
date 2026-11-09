@@ -64,12 +64,21 @@ SSH_UFW_NETTOYAGE = """for i in $(seq 1 10); do
 done
 """
 
+ARRET_INJECTION = """systemctl is-active nginx > /tmp/aiops_demo_arret_etat 2>&1 || true
+systemctl stop nginx
+"""
+ARRET_NETTOYAGE = """if [ "$(cat /tmp/aiops_demo_arret_etat 2>/dev/null)" = "active" ]; then systemctl start nginx || true; fi
+rm -f /tmp/aiops_demo_arret_etat
+"""
+
 SCENARIOS = {s.nom: s for s in [
     Scenario("noeud", "Node Exporter arrêté (cible de supervision injoignable)", VM2, "up", ":9100",
              [(VM2, True, "systemctl stop prometheus-node-exporter\n")],
              [(VM2, True, "systemctl start prometheus-node-exporter\n")], 150, "environ 40 s"),
     Scenario("service", "Service nginx en échec (configuration cassée)", VM2, "service", "nginx.service",
              [(VM2, True, NGINX_INJECTION)], [(VM2, True, NGINX_NETTOYAGE)], 180, "environ 40 s"),
+    Scenario("arret", "Service nginx arrêté proprement (port 80 fermé)", VM2, "sonde", ":80",
+             [(VM2, True, ARRET_INJECTION)], [(VM2, True, ARRET_NETTOYAGE)], 150, "environ 30 s"),
     Scenario("disque", "Disque presque plein (gros fichier journal sur /srv/demo-disque)", VM2, "disque",
              "/srv/demo-disque", [(VM2, True, DISQUE_INJECTION)], [(VM2, True, DISQUE_NETTOYAGE)], 150,
              "environ 20 s"),

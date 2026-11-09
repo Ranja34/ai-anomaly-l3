@@ -15,7 +15,7 @@ from aiops.agent1 import _compacter, _description
 from aiops.validation import CorrectionRefusee, valider_correction
 
 DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
-                       "service": 90, "reseau": 120, "securite": 180, "logs": 180}
+                       "service": 90, "reseau": 120, "securite": 180, "logs": 180, "sonde": 60}
 RISQUES = ("faible", "moyen", "eleve")
 
 
@@ -194,6 +194,7 @@ MESSAGES_VERIFICATION = {
     "reseau": ("la perturbation réseau a disparu", "la perturbation réseau persiste"),
     "securite": ("les tentatives d'attaque ont cessé", "les tentatives d'attaque continuent"),
     "logs": ("plus d'erreur critique détectée", "des erreurs critiques sont encore détectées"),
+    "sonde": ("le service répond de nouveau", "le service ne répond toujours pas"),
 }
 
 

@@ -14,7 +14,7 @@ class TestScenarios(unittest.TestCase):
         db.init_db()
 
     def test_catalogue(self):
-        self.assertEqual(set(scenarios.SCENARIOS), {"noeud", "service", "disque", "cpu", "reseau", "ssh"})
+        self.assertEqual(set(scenarios.SCENARIOS), {"noeud", "service", "disque", "cpu", "reseau", "ssh", "arret"})
         for sc in scenarios.SCENARIOS.values():
             self.assertTrue(sc.injection and sc.nettoyage, sc.nom)
             self.assertIn(sc.machine, config.ADRESSES)
