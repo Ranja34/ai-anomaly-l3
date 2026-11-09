@@ -1,0 +1,38 @@
+# Sondes de disponibilité, vues depuis VM1 comme le verrait un utilisateur du réseau.
+# Générées par « python -m aiops.sondes --decouvrir --ecrire » : retire ce qui ne doit pas être surveillé.
+# Types : tcp (le port accepte une connexion) ou http (la page répond avec un code inférieur à 500).
+sondes:
+  - machine: frappe-staging
+    type: tcp
+    port: 22
+  - machine: frappe-staging
+    type: http
+    port: 80
+    chemin: /
+  - machine: frappe-staging
+    type: http
+    port: 3000
+    chemin: /api/health
+  - machine: frappe-staging
+    type: http
+    port: 3100
+    chemin: /ready
+  - machine: frappe-staging
+    type: http
+    port: 5000
+    chemin: /api/etat
+  - machine: frappe-staging
+    type: http
+    port: 8080
+    chemin: /
+  - machine: frappe-staging
+    type: http
+    port: 9090
+    chemin: /-/ready
+  - machine: runner-devops
+    type: tcp
+    port: 22
+  - machine: runner-devops
+    type: http
+    port: 80
+    chemin: /
