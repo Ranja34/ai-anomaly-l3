@@ -182,7 +182,7 @@ def collecter_anomalies(r=None):
     r = r or _reglages()
     anomalies = []
 
-    for s in _requete(f'max_over_time(up{{instance=~".*:9100"}}[{r["fenetre_up"]}])'):
+    for s in _requete(f'max_over_time(up{{instance=~".*:(9100|9182)"}}[{r["fenetre_up"]}])'):
         if float(s["value"][1]) == 0:
             inst = s["metric"]["instance"]
             m = _machine(inst)

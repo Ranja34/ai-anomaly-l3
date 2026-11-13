@@ -23,6 +23,7 @@ class Scenario:
     nettoyage: list
     delai_detection: int = 240
     detection: str = ""
+    observation: bool = False
 
 
 NGINX_INJECTION = """systemctl is-active nginx > /tmp/aiops_demo_nginx_etat 2>&1 || true
@@ -91,6 +92,17 @@ SCENARIOS = {s.nom: s for s in [
              [("local", False, SSH_ARRET), ("local", True, SSH_ALIAS_RETRAIT), (VM2, True, SSH_UFW_NETTOYAGE)],
              240, "environ 40 s"),
 ]}
+
+
+_ENTREPRISE = next((n for n, m in config.INVENTAIRE.items() if m["mode"] == "observation"), None)
+if _ENTREPRISE:
+    _IP = config.ADRESSES[_ENTREPRISE]
+    SCENARIOS["entreprise"] = Scenario(
+        "entreprise", f"Coupure du lien VM1 -> {_ENTREPRISE} (règle locale sur VM1, le serveur n'est pas touché)",
+        _ENTREPRISE, "sonde", f"sonde:{_ENTREPRISE}:toutes",
+        [("local", True, f"iptables -I OUTPUT 1 -d {_IP} -j DROP\n")],
+        [("local", True, f"while iptables -D OUTPUT -d {_IP} -j DROP 2>/dev/null; do :; done\n")],
+        180, "environ 30 s", observation=True)
 
 
 def _t(iso):
@@ -209,7 +221,7 @@ def lancer(sc):
         notifie, fin = 0, time.time() + 900
         while time.time() < fin:
             inc = db.get_incident(iid)
-            if inc["statut"] in db.STATUTS_FINAUX:
+            if inc["statut"] in db.STATUTS_FINAUX or (sc.observation and inc["statut"] == "diagnostique"):
                 break
             if inc["statut"] == "attente_approbation" and inc["tentatives"] > notifie:
                 notifie = inc["tentatives"]

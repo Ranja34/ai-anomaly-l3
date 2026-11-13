@@ -34,7 +34,7 @@ def _regles_mode():
 
 
 def _systeme():
-    machines = ", ".join(sorted(config.ADRESSES))
+    machines = ", ".join(config.machines_actionnables())
     interdits = _regles_mode()
     return f"""Tu es un ingénieur système Linux (Ubuntu 22.04) chargé de CORRIGER un incident dans un laboratoire de deux machines : {machines}.
 Tu écris toi-même la correction : soit un playbook Ansible, soit un script bash, selon ce qui est le plus simple et le plus sûr.
@@ -107,7 +107,7 @@ def _normaliser(rep, inc):
         raise CorrectionRefusee("réponse IA incomplète (type ou contenu manquant)")
     return {
         "type": type_, "contenu": contenu,
-        "machine": rep.get("machine") if rep.get("machine") in config.ADRESSES else inc["machine"],
+        "machine": rep.get("machine") if rep.get("machine") in config.machines_actionnables() else inc["machine"],
         "sudo_requis": bool(rep.get("sudo_requis")),
         "risque": rep.get("risque") if rep.get("risque") in RISQUES else "moyen",
         "resume_action": str(rep.get("resume_action") or "Correction proposée")[:300],
@@ -127,6 +127,8 @@ def proposer(incident_id):
     if inc["statut"] not in ("diagnostique", "nouvelle_tentative"):
         raise ValueError(f"Statut inattendu pour proposer une correction : {inc['statut']}")
     maxi = _max_tentatives()
+    if config.mode_de(inc["machine"]) == "observation" or not config.ssh_actif(inc["machine"]):
+        raise ValueError(f"{inc['machine']} est en observation ou sans accès SSH : aucune correction automatique")
     tentative = inc["tentatives"] + 1
     if tentative > maxi:
         _escalader(incident_id, f"{maxi} tentatives épuisées sans résolution.")

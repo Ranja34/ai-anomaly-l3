@@ -15,7 +15,7 @@ def _max_tours():
 
 
 def _systeme(maxi):
-    machines = ", ".join(sorted(config.ADRESSES))
+    machines = ", ".join(config.machines_ssh())
     return f"""Tu es un ingénieur système, réseau et sécurité Linux chargé du DIAGNOSTIC d'incidents dans un laboratoire de deux machines Ubuntu 22.04 : {machines}.
 Contexte : ufw actif ; nginx et docker installés ; fail2ban sur frappe-staging ; Prometheus, Loki et Grafana sur frappe-staging ; les journaux d'authentification sont dans journalctl (unité ssh) et dans /var/log/auth.log.
 Tu réponds UNIQUEMENT par un objet JSON valide, en français, sans texte autour. Tu ne proposes aucune correction ici : seulement le diagnostic, appuyé sur des preuves.
@@ -27,7 +27,8 @@ Règles : pipes, grep, awk, sort, head, tail autorisés ; aucune modification (p
 Dès que tu as assez de preuves :
 {{"action": "conclure", "resume": "2 phrases claires", "gravite": "faible|moyenne|haute|critique", "cause_probable": "...", "confiance": "faible|moyenne|haute", "preuves": ["fait observé 1", "fait observé 2"], "service_concerne": "nom du service ou null", "machine": "machine concernée", "verification_recommandee": "comment vérifier que c'est réglé"}}
 Ne conclus jamais que « les logs ne sont pas disponibles » sans avoir essayé journalctl ET une lecture avec sudo. Si l'incident est un faux positif ou ne demande aucune action, dis-le dans le résumé.
-Si les preuves déjà fournies suffisent, conclus IMMÉDIATEMENT (action = conclure) : n'enquête que s'il manque un fait essentiel."""
+Si les preuves déjà fournies suffisent, conclus IMMÉDIATEMENT (action = conclure) : n'enquête que s'il manque un fait essentiel.
+Si « acces_ssh » vaut false, tu ne peux lancer aucune commande : conclus à partir des preuves fournies (sondes réseau) et indique ce qu'il faudrait vérifier à la main."""
 
 
 def _commandes_standard(inc):
@@ -100,6 +101,10 @@ def _executer_liste(commandes):
         machine, commande = element[0], element[1]
         sudo = bool(element[2]) if len(element) > 2 else False
         if machine in injoignables:
+            continue
+        if not config.ssh_actif(machine):
+            preuves.append({"machine": machine, "commande": commande, "code": None,
+                            "sortie": "COMMANDE IMPOSSIBLE : pas d'accès SSH configuré pour cette machine"})
             continue
         try:
             res = ssh.executer(machine, commande, sudo)
@@ -186,7 +191,8 @@ def _boucle_ia(inc, preuves):
         dernier = forcer or tour == maxi
         message = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
                                 "gravite_initiale": inc["gravite"],
-                                "description": _description(inc)},
+                                "description": _description(inc),
+                                "acces_ssh": config.ssh_actif(inc["machine"])},
                    "preuves": _budget(preuves), "tour": f"{tour}/{maxi}"}
         if dernier:
             message["consigne"] = "Tu dois conclure maintenant (action = conclure)."
@@ -216,6 +222,28 @@ def _boucle_ia(inc, preuves):
     raise llm.LLMErreur("Le diagnostic n'a pas abouti")
 
 
+def _preuves_sans_ssh(inc):
+    """Machine sans accès SSH : on observe ce qu'un utilisateur verrait (sondes et ping depuis VM1)."""
+    from aiops import detecteurs, sondes  # import local : évite une dépendance circulaire
+    machine, preuves = inc["machine"], []
+    try:
+        liste = [s for s in sondes.charger() if s.machine == machine]
+    except (ValueError, OSError):
+        liste = []
+    for sonde, ok, detail, ms in sondes.executer_toutes(liste):
+        preuves.append({"machine": machine, "code": 0 if ok else 1, "commande": f"sonde {sonde.libelle()} depuis VM1",
+                        "sortie": f"{'OK' if ok else 'ÉCHEC'} : {detail} ({ms:.0f} ms)"})
+    ip = config.ADRESSES.get(machine)
+    mesure = detecteurs._sonde_ping(ip) if ip else None
+    if mesure:
+        perte, latence = mesure
+        texte = f"{perte:.0f} % de paquets perdus" + (f", latence moyenne {latence:.0f} ms" if latence is not None else "")
+    else:
+        texte = "mesure impossible"
+    preuves.append({"machine": machine, "commande": "ping depuis VM1", "code": 0, "sortie": texte})
+    return preuves
+
+
 def diagnostiquer(incident_id):
     """Enquête + diagnostic. Retourne le diagnostic, ou None si l'IA n'a pas pu répondre."""
     inc = db.get_incident(incident_id)
@@ -225,9 +253,14 @@ def diagnostiquer(incident_id):
     db.changer_statut(incident_id, "diagnostic_en_cours",
                       f"Enquête en lecture seule lancée sur {machine}", "enquete")
 
-    preuves = _executer_liste(_commandes_standard(inc))
+    if config.ssh_actif(machine):
+        preuves = _executer_liste(_commandes_standard(inc))
+        message_enquete = f"{len(preuves)} commandes en lecture seule exécutées sur {machine}"
+    else:
+        preuves = _preuves_sans_ssh(inc)
+        message_enquete = f"Pas d'accès SSH à {machine} : {len(preuves)} sondes exécutées depuis VM1"
     db.ajouter_evenement(incident_id, "enquete",
-                         f"{len(preuves)} commandes en lecture seule exécutées sur {machine}",
+                         message_enquete,
                          {"preuves": preuves})
     try:
         diag = _boucle_ia(inc, preuves)

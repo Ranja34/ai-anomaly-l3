@@ -8,7 +8,7 @@ import traceback
 
 import requests
 
-from aiops import agent1, agent2, db, detecteurs, llm
+from aiops import agent1, agent2, config, db, detecteurs, llm
 from aiops.temps import formater_local, maintenant_utc
 
 STATUTS_A_SURVEILLER = ("diagnostique", "attente_approbation", "nouvelle_tentative")
@@ -105,6 +105,8 @@ class Orchestrateur:
                 return
         for statut in ("diagnostique", "nouvelle_tentative"):
             for inc in reversed(db.lister_incidents(statut=statut)):
+                if config.mode_de(inc["machine"]) == "observation" or not config.ssh_actif(inc["machine"]):
+                    continue
                 if not self._etape_ia(inc["id"], agent2.proposer, "Rédaction de la correction"):
                     return
 

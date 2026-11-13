@@ -1,4 +1,5 @@
 import os
 
-# Les tests ne sondent jamais le vrai réseau : aucun fichier de sondes par défaut
+# Les tests ne touchent jamais au vrai réseau ni à la vraie configuration
 os.environ["SONDES_FICHIER"] = "/nonexistent/sondes.yml"
+os.environ["AIOPS_INVENTAIRE"] = "/nonexistent/inventaire.yml"

@@ -1,0 +1,19 @@
+# Inventaire des machines supervisées (source unique). Copie ce fichier en inventaire.yml et adapte-le.
+# os     : linux | windows
+# ssh    : true si le système peut s'y connecter en SSH pour enquêter (défaut : true pour linux, false pour windows)
+# mode   : approbation (l'IA propose des corrections que tu approuves) | observation (détection et diagnostic seulement)
+# port_metriques : port de l'agent de métriques (9100 Node Exporter, 9182 windows_exporter)
+machines:
+  - nom: frappe-staging
+    ip: 10.10.0.10
+    os: linux
+    mode: approbation
+  - nom: runner-devops
+    ip: 10.10.0.20
+    os: linux
+    mode: approbation
+  # Exemple d'un serveur Windows supervisé en observation seule :
+  # - nom: srv-windows
+  #   ip: 192.0.2.50
+  #   os: windows
+  #   mode: observation

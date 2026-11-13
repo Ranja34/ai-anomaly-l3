@@ -103,7 +103,7 @@ def _ouvert(ip, port):
 
 def decouvrir():
     """Ports courants actuellement ouverts sur chaque machine : [(machine, port), ...]."""
-    taches = [(m, p) for m in sorted(config.ADRESSES) for p in PORTS_COURANTS]
+    taches = [(m, p) for m in config.machines_ssh() for p in PORTS_COURANTS]
     with ThreadPoolExecutor(max_workers=16) as pool:
         ouverts = list(pool.map(lambda t: _ouvert(config.ADRESSES[t[0]], t[1]), taches))
     return [t for t, ouvert in zip(taches, ouverts) if ouvert]

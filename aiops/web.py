@@ -40,11 +40,18 @@ def _duree(secondes):
     return f"{minutes} min {reste} s" if minutes else f"{reste} s"
 
 
+def _libelle(i):
+    if i["statut"] == "diagnostique" and (config.mode_de(i["machine"]) == "observation"
+                                          or not config.ssh_actif(i["machine"])):
+        return "Diagnostiqué · observation (aucune action)"
+    return LIBELLES.get(i["statut"], i["statut"])
+
+
 def _resume(i, a_proposition):
     secondes = _secondes(i["cree_le"], i["resolu_le"]) if i.get("resolu_le") else None
     return {
         "id": i["id"], "titre": i["titre"], "machine": i["machine"], "source": i["source"],
-        "gravite": i["gravite"], "statut": i["statut"], "statut_libelle": LIBELLES.get(i["statut"], i["statut"]),
+        "gravite": i["gravite"], "statut": i["statut"], "statut_libelle": _libelle(i),
         "classe": CLASSES.get(i["statut"], "info"), "finale": i["statut"] in db.STATUTS_FINAUX,
         "tentatives": i["tentatives"], "cree_le": formater_local(i["cree_le"]),
         "a_decision": a_proposition or i["statut"] == "verification_manuelle",

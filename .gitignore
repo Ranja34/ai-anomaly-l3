@@ -47,3 +47,7 @@ ansible/inventory.ini
 data/
 ansible/playbooks/proposal_*.yml
 *.bak*
+
+# Configuration propre à chaque environnement (adresses internes)
+inventaire.yml
+sondes.yml
