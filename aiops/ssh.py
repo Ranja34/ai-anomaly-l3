@@ -11,6 +11,9 @@ def executer(machine, commande, sudo=False, timeout=25):
     if not config.ssh_actif(machine):
         return {"ok": False, "code": None, "sortie": "pas d'accès SSH configuré pour cette machine",
                 "injoignable": False}
+    if not config.ssh_actif(machine):
+        return {"ok": False, "code": None, "sortie": "pas d'accès SSH configuré pour cette machine",
+                "injoignable": False}
     hote = config.ADRESSES.get(machine)
     if not hote:
         return {"ok": False, "code": None, "sortie": f"machine inconnue : {machine}", "injoignable": False}

@@ -32,3 +32,9 @@ sondes:
     type: http
     port: 80
     chemin: /
+  - machine: srv-entreprise
+    type: tcp
+    port: 3389
+  - machine: srv-entreprise
+    type: tcp
+    port: 445
