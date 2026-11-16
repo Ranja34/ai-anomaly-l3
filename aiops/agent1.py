@@ -185,7 +185,7 @@ def _description(inc):
 
 
 def _boucle_ia(inc, preuves):
-    maxi = _max_tours()
+    maxi = _max_tours() if config.ssh_actif(inc["machine"]) else 1
     forcer = False
     for tour in range(1, maxi + 1):
         dernier = forcer or tour == maxi

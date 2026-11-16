@@ -53,5 +53,3 @@ inventaire.yml
 sondes.yml
 
 # Configuration propre à chaque environnement (adresses internes)
-inventaire.yml
-sondes.yml
