@@ -24,6 +24,8 @@ class Scenario:
     delai_detection: int = 240
     detection: str = ""
     observation: bool = False
+    consigne: str = ""
+    consigne_fin: str = ""
 
 
 NGINX_INJECTION = """systemctl is-active nginx > /tmp/aiops_demo_nginx_etat 2>&1 || true
@@ -103,6 +105,15 @@ if _ENTREPRISE:
         [("local", True, f"iptables -I OUTPUT 1 -d {_IP} -j DROP\n")],
         [("local", True, f"while iptables -D OUTPUT -d {_IP} -j DROP 2>/dev/null; do :; done\n")],
         180, "environ 30 s", observation=True)
+    if config.INVENTAIRE[_ENTREPRISE].get("services"):
+        _SERVICE = config.INVENTAIRE[_ENTREPRISE]["services"][0]
+        SCENARIOS["windows"] = Scenario(
+            "windows", f"Service Windows « {_SERVICE} » arrêté à la main sur {_ENTREPRISE}",
+            _ENTREPRISE, "service", "win:service:", [], [], 480, "environ 40 s après l'arrêt", observation=True,
+            consigne=(f">>> Sur {_ENTREPRISE} (Windows) : ouvre une invite de commandes en administrateur et tape : "
+                      f"net stop {_SERVICE}\n    Le système détecte l'arrêt en 40 s environ (délai maximal : 8 min)."),
+            consigne_fin=(f">>> Remets maintenant le service en marche sur {_ENTREPRISE} : net start {_SERVICE}\n"
+                          "    L'incident doit se fermer tout seul."))
 
 
 def _t(iso):
@@ -211,7 +222,10 @@ def lancer(sc):
             if code != 0:
                 print(f"Échec de l'injection sur {cible} : {sortie[-300:]}")
                 return
-        print(f"Panne provoquée. Détection attendue : {sc.detection}.", flush=True)
+        if sc.consigne:
+            print(sc.consigne, flush=True)
+        else:
+            print(f"Panne provoquée. Détection attendue : {sc.detection}.", flush=True)
         iid = _attendre(lambda: _trouver(sc, t0), sc.delai_detection)
         if not iid:
             print("Aucun incident correspondant détecté dans le délai prévu.")
@@ -229,6 +243,11 @@ def lancer(sc):
                       flush=True)
             time.sleep(1)
         _rapport(iid, t0)
+        if sc.consigne_fin:
+            print(sc.consigne_fin, flush=True)
+            fini = _attendre(lambda: db.get_incident(iid)["statut"] in db.STATUTS_FINAUX, 420)
+            suite = " (clos automatiquement)" if fini else " (toujours ouvert : le problème n'est pas encore résolu)"
+            print(f"Incident {iid} : {db.get_incident(iid)['statut']}{suite}", flush=True)
     finally:
         print("Nettoyage...", flush=True)
         _nettoyer(sc)

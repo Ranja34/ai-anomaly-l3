@@ -57,7 +57,8 @@ def _charger_inventaire():
             raise ValueError(f"inventaire : machine en double ({nom})")
         inventaire[nom] = {"nom": nom, "ip": str(m["ip"]), "os": systeme, "mode": mode,
                            "ssh": bool(m.get("ssh", systeme == "linux")),
-                           "port_metriques": int(m.get("port_metriques", 9100 if systeme == "linux" else 9182))}
+                           "port_metriques": int(m.get("port_metriques", 9100 if systeme == "linux" else 9182)),
+                           "services": [str(x).lower() for x in (m.get("services") or [])]}
     if not inventaire:
         raise ValueError("inventaire vide")
     return inventaire

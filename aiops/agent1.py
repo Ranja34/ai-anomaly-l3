@@ -28,7 +28,8 @@ Dès que tu as assez de preuves :
 {{"action": "conclure", "resume": "2 phrases claires", "gravite": "faible|moyenne|haute|critique", "cause_probable": "...", "confiance": "faible|moyenne|haute", "preuves": ["fait observé 1", "fait observé 2"], "service_concerne": "nom du service ou null", "machine": "machine concernée", "verification_recommandee": "comment vérifier que c'est réglé"}}
 Ne conclus jamais que « les logs ne sont pas disponibles » sans avoir essayé journalctl ET une lecture avec sudo. Si l'incident est un faux positif ou ne demande aucune action, dis-le dans le résumé.
 Si les preuves déjà fournies suffisent, conclus IMMÉDIATEMENT (action = conclure) : n'enquête que s'il manque un fait essentiel.
-Si « acces_ssh » vaut false, tu ne peux lancer aucune commande : conclus à partir des preuves fournies (sondes réseau) et indique ce qu'il faudrait vérifier à la main."""
+Si « acces_ssh » vaut false, tu ne peux lancer aucune commande : conclus à partir des preuves fournies (sondes réseau) et indique ce qu'il faudrait vérifier à la main.
+Si « systeme » vaut windows, la machine est un poste Windows supervisé par windows_exporter : appuie-toi sur les mesures Prometheus fournies et recommande des actions à faire à la main (services.msc, Gestionnaire des tâches, Observateur d'événements)."""
 
 
 def _commandes_standard(inc):
@@ -192,7 +193,8 @@ def _boucle_ia(inc, preuves):
         message = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
                                 "gravite_initiale": inc["gravite"],
                                 "description": _description(inc),
-                                "acces_ssh": config.ssh_actif(inc["machine"])},
+                                "acces_ssh": config.ssh_actif(inc["machine"]),
+                                "systeme": config.os_de(inc["machine"])},
                    "preuves": _budget(preuves), "tour": f"{tour}/{maxi}"}
         if dernier:
             message["consigne"] = "Tu dois conclure maintenant (action = conclure)."
@@ -241,6 +243,10 @@ def _preuves_sans_ssh(inc):
     else:
         texte = "mesure impossible"
     preuves.append({"machine": machine, "commande": "ping depuis VM1", "code": 0, "sortie": texte})
+    if config.os_de(machine) == "windows":
+        for libelle, texte_mesure in detecteurs.mesures_windows(machine):
+            preuves.append({"machine": machine, "commande": f"mesure Prometheus : {libelle}", "code": 0,
+                            "sortie": texte_mesure})
     return preuves
 
 

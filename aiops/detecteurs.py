@@ -41,6 +41,10 @@ def _reglages():
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
         "fenetre_up": os.getenv("UP_FENETRE", "30s"),
+        "win_seuil_cpu": float(os.getenv("WIN_SEUIL_CPU", "90")),
+        "win_seuil_ram": float(os.getenv("WIN_SEUIL_RAM", "95")),
+        "win_seuil_disque": float(os.getenv("WIN_SEUIL_DISQUE", "90")),
+        "conf_win_s": int(os.getenv("CONFIRM_WIN_S", "60")),
         "conf_sonde_s": int(os.getenv("CONFIRM_SONDE_S", "20")),
         "cooldown_escalade_s": int(os.getenv("DETECT_COOLDOWN_ESCALADE_S", "3600")),
         "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "40")),
@@ -163,6 +167,126 @@ def _anomalies_sondes(r):
     return anomalies
 
 
+_ETAT_WINDOWS = {"ok": True}
+
+WIN_CPU = '100 - (avg by (instance) (rate(windows_cpu_time_total{mode="idle"}[1m])) * 100)'
+WIN_RAM = ('(1 - windows_memory_available_bytes / windows_cs_physical_memory_bytes) * 100 '
+           'or (1 - windows_os_physical_memory_free_bytes / windows_os_visible_memory_bytes) * 100')
+WIN_DISQUE = ('(1 - windows_logical_disk_free_bytes{volume!~"HarddiskVolume.*"} / '
+              'windows_logical_disk_size_bytes{volume!~"HarddiskVolume.*"}) * 100')
+
+
+def _valeur_finie(serie):
+    try:
+        v = float(serie["value"][1])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _machine_windows(instance):
+    """Nom de la machine Windows correspondant à une cible Prometheus, ou None."""
+    m = _machine(instance)
+    return m if m in config.ADRESSES and config.os_de(m) == "windows" else None
+
+
+def _anomalies_windows(r):
+    """Détection des machines Windows (windows_exporter). Une erreur ici ne bloque jamais le reste de la détection."""
+    if not any(m["os"] == "windows" for m in config.INVENTAIRE.values()):
+        return []
+    anomalies = []
+    try:
+        for s in _requete(WIN_CPU):
+            v, inst = _valeur_finie(s), s["metric"].get("instance", "")
+            m = _machine_windows(inst)
+            if m and v is not None and v > r["win_seuil_cpu"]:
+                anomalies.append(Anomalie(
+                    f"win:cpu:{inst}", m, "cpu", _gravite(v), f"Processeur saturé sur {m}",
+                    f"Utilisation processeur : {v:.1f} % (seuil : {r['win_seuil_cpu']:.0f} %).", r["conf_win_s"]))
+        for s in _requete(WIN_RAM):
+            v, inst = _valeur_finie(s), s["metric"].get("instance", "")
+            m = _machine_windows(inst)
+            if m and v is not None and v > r["win_seuil_ram"]:
+                anomalies.append(Anomalie(
+                    f"win:ram:{inst}", m, "ram", _gravite(v), f"Mémoire saturée sur {m}",
+                    f"Utilisation mémoire : {v:.1f} % (seuil : {r['win_seuil_ram']:.0f} %).", r["conf_win_s"]))
+        for s in _requete(WIN_DISQUE):
+            v, inst = _valeur_finie(s), s["metric"].get("instance", "")
+            m = _machine_windows(inst)
+            if m and v is not None and v > r["win_seuil_disque"]:
+                volume = s["metric"].get("volume", "?")
+                anomalies.append(Anomalie(
+                    f"win:disque:{inst}:{volume}", m, "disque", _gravite(v),
+                    f"Disque presque plein sur {m} ({volume})",
+                    f"Volume {volume} rempli à {v:.1f} % (seuil : {r['win_seuil_disque']:.0f} %).", 0))
+        for nom_machine, info in config.INVENTAIRE.items():
+            noms = info.get("services") or []
+            if info["os"] != "windows" or not noms:
+                continue
+            inst = f'{info["ip"]}:{info["port_metriques"]}'
+            motif = "|".join(re.escape(n) for n in noms)
+            for s in _requete(f'windows_service_state{{instance="{inst}",state="running",name=~"{motif}"}} == 0'):
+                nom = s["metric"].get("name", "?")
+                anomalies.append(Anomalie(
+                    f"win:service:{inst}:{nom}", nom_machine, "service", "haute",
+                    f"Service Windows « {nom} » arrêté sur {nom_machine}",
+                    f"Le service Windows {nom} n'est plus en cours d'exécution.", r["conf_service_s"]))
+    except (requests.RequestException, RuntimeError, ValueError, KeyError, IndexError) as e:
+        if _ETAT_WINDOWS["ok"]:
+            print(f"Détection Windows suspendue ({type(e).__name__}) : le reste de la détection continue", flush=True)
+        _ETAT_WINDOWS["ok"] = False
+        return []
+    _ETAT_WINDOWS["ok"] = True
+    return anomalies
+
+
+def mesures_windows(machine):
+    """Instantané des mesures Prometheus d'une machine Windows (preuves pour le diagnostic sans SSH)."""
+    info = config.INVENTAIRE.get(machine) or {}
+    if info.get("os") != "windows":
+        return []
+    sel = f'instance="{info["ip"]}:{info["port_metriques"]}"'
+    resultat = []
+    blocs = [
+        ("processeur utilisé", [f'100 - (avg(rate(windows_cpu_time_total{{{sel},mode="idle"}}[1m])) * 100)']),
+        ("mémoire utilisée", [
+            f'(1 - windows_memory_available_bytes{{{sel}}} / windows_cs_physical_memory_bytes{{{sel}}}) * 100',
+            f'(1 - windows_os_physical_memory_free_bytes{{{sel}}} / windows_os_visible_memory_bytes{{{sel}}}) * 100']),
+        ("disques utilisés", [
+            f'(1 - windows_logical_disk_free_bytes{{{sel},volume!~"HarddiskVolume.*"}} / '
+            f'windows_logical_disk_size_bytes{{{sel},volume!~"HarddiskVolume.*"}}) * 100']),
+    ]
+    for libelle, requetes in blocs:
+        for requete in requetes:
+            try:
+                serie = _requete(requete)
+            except (requests.RequestException, RuntimeError, ValueError, KeyError, IndexError):
+                serie = []
+            valeurs = []
+            for s in serie:
+                v = _valeur_finie(s)
+                if v is None:
+                    continue
+                etiquette = s["metric"].get("volume")
+                valeurs.append(f"{etiquette} {v:.0f} %" if etiquette else f"{v:.0f} %")
+            if valeurs:
+                resultat.append((libelle, " ; ".join(valeurs)))
+                break
+        else:
+            resultat.append((libelle, "aucune mesure reçue"))
+    noms = info.get("services") or []
+    if noms:
+        motif = "|".join(re.escape(n) for n in noms)
+        try:
+            serie = _requete(f'windows_service_state{{{sel},state="running",name=~"{motif}"}}')
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, IndexError):
+            serie = []
+        etats = [f"{s['metric'].get('name', '?')} : {'en cours' if _valeur_finie(s) == 1 else 'ARRÊTÉ'}"
+                 for s in serie]
+        resultat.append(("services surveillés", " ; ".join(etats) or "aucune mesure reçue"))
+    return resultat
+
+
 def _sonde_ping(ip, n=5):
     """Ping actif depuis cette machine. Retourne (perte en %, latence moyenne en ms) ou None."""
     try:
@@ -189,7 +313,8 @@ def collecter_anomalies(r=None):
             anomalies.append(Anomalie(
                 f"up:{inst}", m, "up", "haute",
                 f"Cible de supervision injoignable sur {m}",
-                f"Prometheus ne parvient plus à joindre {inst} (Node Exporter) : "
+                f"Prometheus ne parvient plus à joindre {inst} "
+                f"({'windows_exporter' if inst.endswith(':9182') else 'Node Exporter'}) : "
                 "le service est arrêté ou la machine est inaccessible.",
                 r["conf_up_s"]))
 
@@ -301,6 +426,7 @@ def collecter_anomalies(r=None):
                 f"Ping de {nom_local} vers {nom} ({ip}) : latence moyenne de {latence:.0f} ms "
                 f"(seuil : {r['seuil_latence_ms']:.0f} ms).", r["conf_reseau_s"]))
 
+    anomalies.extend(_anomalies_windows(r))
     anomalies.extend(_anomalies_loki(r))
     anomalies.extend(_anomalies_sondes(r))
     # Corrélation : une machine déjà signalée en échec (cible ou service) n'ouvre pas aussi un incident de sonde

@@ -17,3 +17,4 @@ machines:
   #   ip: 192.0.2.50
   #   os: windows
   #   mode: observation
+  #   services: [spooler, lanmanserver]   # services Windows à surveiller (noms en minuscules)
