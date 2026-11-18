@@ -326,3 +326,9 @@ def nombre_appels_ia_depuis(minutes):
     limite = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
     with connexion() as c:
         return c.execute("SELECT COUNT(*) FROM appels_ia WHERE horodatage >= ?", (limite,)).fetchone()[0]
+
+
+def compter_evenements(incident_id, type_evenement):
+    with connexion() as c:
+        return c.execute("SELECT COUNT(*) FROM evenements WHERE incident_id = ? AND type = ?",
+                         (incident_id, type_evenement)).fetchone()[0]
