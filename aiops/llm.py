@@ -73,6 +73,33 @@ def _attente_429(rep):
         return None
 
 
+def _tokens_utilises(rep):
+    try:
+        return int(rep.json()["usage"]["total_tokens"])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return 0
+
+
+def _attendre_jetons(besoin):
+    """Attend, si nécessaire, que la fenêtre de tokens par minute du fournisseur permette l'appel."""
+    etat = db.get_etat("limites_ia")
+    if not etat:
+        return
+    try:
+        entetes = json.loads(etat["valeur"])
+        limite = float(entetes["x-ratelimit-limit-tokens"])
+        reste = float(entetes["x-ratelimit-remaining-tokens"])
+        ecoule = (datetime.now(timezone.utc) - datetime.fromisoformat(etat["mis_a_jour_le"])).total_seconds()
+    except (ValueError, KeyError, TypeError):
+        return
+    debit = limite / 60
+    disponible = min(limite, reste + max(0.0, ecoule) * debit)
+    besoin = min(besoin, limite)
+    if disponible >= besoin:
+        return
+    time.sleep(min(60.0, (besoin - disponible) / debit + 0.5))
+
+
 def _reglages():
     return {
         "fournisseur": os.getenv("LLM_PROVIDER", "mock").lower(),
@@ -150,6 +177,7 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
         if db.nombre_appels_ia_depuis(60) >= r["max_appels_heure"]:
             raise QuotaDepasse(f"Limite de {r['max_appels_heure']} appels IA par heure atteinte")
         _attendre_intervalle(r["intervalle_min"])
+        _attendre_jetons((len(systeme) + len(utilisateur)) / 3 + r["max_tokens"])
 
         try:
             rep = requests.post(f"{r['url']}/chat/completions", headers=entetes,
@@ -206,7 +234,7 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
             db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)
             continue
 
-        db.enregistrer_appel_ia(f, m, objet, True)
+        db.enregistrer_appel_ia(f, m, objet, True, tokens=_tokens_utilises(rep))
         return donnees
 
     raise LLMErreur(f"Échec après {r['tentatives'] + 1} tentatives : {derniere_erreur}")

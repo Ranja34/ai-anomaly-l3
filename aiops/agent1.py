@@ -102,7 +102,7 @@ def _executer_liste(commandes):
     return preuves
 
 
-def _budget(preuves, max_total=9000):
+def _budget(preuves, max_total=6000):
     """Limite la taille envoyée à l'IA : les anciennes sorties sont raccourcies."""
     if sum(len(p["sortie"]) for p in preuves) <= max_total:
         return preuves
