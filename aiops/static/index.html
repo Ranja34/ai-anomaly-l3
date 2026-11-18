@@ -97,7 +97,7 @@ textarea,select{width:100%;background:var(--p2);color:var(--txt);border:1px soli
 <script>
 const $=s=>document.querySelector(s);
 const ICONES={detecte:'🚨',mesure:'📊',signalement:'🗣️',enquete:'🔎',diagnostic:'🧠',proposition:'📝',securite:'🛡️',decision:'✅',execution:'⚙️',verification:'🔍',resolu:'🎉',echec:'⚠️',escalade:'🆘',erreur:'⚡',erreur_ia:'🤖',info:'ℹ️'};
-const SOURCES={up:'Cible injoignable',cpu:'CPU',ram:'Mémoire',disque:'Disque',service:'Service',reseau:'Réseau',securite:'Sécurité',logs:'Journaux',manuel:'Signalé'};
+const SOURCES={up:'Cible injoignable',cpu:'CPU',ram:'Mémoire',disque:'Disque',service:'Service',reseau:'Réseau',securite:'Sécurité',logs:'Journaux',manuel:'Signalé',sonde:'Sonde de service'};
 let onglet='encours',selection=null,liste=[],machines=[],cochees=new Set(),ouverts=new Set(),sigListe='',sigDetail='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m,t){const e=document.createElement('div');e.className='toast '+(t||'');e.textContent=m;$('#toasts').appendChild(e);setTimeout(()=>e.remove(),4500)}

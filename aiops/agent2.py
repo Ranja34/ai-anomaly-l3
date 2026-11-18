@@ -15,7 +15,7 @@ from aiops.agent1 import _compacter, _description
 from aiops.validation import CorrectionRefusee, valider_correction
 
 DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
-                       "service": 90, "reseau": 120, "securite": 180, "logs": 180}
+                       "service": 90, "reseau": 120, "securite": 180, "logs": 180, "sonde": 60}
 RISQUES = ("faible", "moyen", "eleve")
 
 
@@ -186,6 +186,24 @@ def refuser(proposition_id):
     db.changer_statut(prop["incident_id"], "refuse", "Correction refusée par l'administrateur", "decision")
 
 
+MESSAGES_VERIFICATION = {
+    "service": ("le service n'est plus en échec", "le service est toujours en échec"),
+    "disque": ("l'espace disque est repassé sous le seuil", "le disque dépasse encore le seuil"),
+    "cpu": ("le processeur est repassé sous le seuil", "le processeur est toujours saturé"),
+    "ram": ("la mémoire est repassée sous le seuil", "la mémoire est toujours saturée"),
+    "reseau": ("la perturbation réseau a disparu", "la perturbation réseau persiste"),
+    "securite": ("les tentatives d'attaque ont cessé", "les tentatives d'attaque continuent"),
+    "logs": ("plus d'erreur critique détectée", "des erreurs critiques sont encore détectées"),
+    "sonde": ("le service répond de nouveau", "le service ne répond toujours pas"),
+}
+
+
+def _detail_verification(source, ok):
+    reussi, echec = MESSAGES_VERIFICATION.get(source, ("la métrique est repassée sous le seuil",
+                                                       "la métrique dépasse encore le seuil"))
+    return reussi if ok else echec
+
+
 def _verifier(inc, timeout_s, pas_s=5):
     fin = time.monotonic() + timeout_s
     while True:
@@ -199,7 +217,7 @@ def _verifier(inc, timeout_s, pas_s=5):
             else:
                 presentes = {a.empreinte for a in detecteurs.collecter_anomalies()}
                 ok = inc["empreinte"] not in presentes
-                detail = "la métrique est repassée sous le seuil" if ok else "la métrique dépasse encore le seuil"
+                detail = _detail_verification(inc["source"], ok)
         except (requests.RequestException, RuntimeError, ValueError, KeyError, IndexError) as e:
             ok, detail = False, f"vérification impossible ({type(e).__name__})"
         if ok or time.monotonic() >= fin:
