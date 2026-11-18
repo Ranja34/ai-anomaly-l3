@@ -109,14 +109,14 @@ def decouvrir():
     return [t for t, ouvert in zip(taches, ouverts) if ouvert]
 
 
-def _yaml(trouvees):
+def _yaml(trouvees, forcer_tcp=()):
     lignes = ["# Sondes de disponibilité, vues depuis VM1 comme le verrait un utilisateur du réseau.",
               "# Générées par « python -m aiops.sondes --decouvrir --ecrire » : retire ce qui ne doit pas être surveillé.",
               "# Types : tcp (le port accepte une connexion) ou http (la page répond avec un code inférieur à 500).",
               "sondes:"]
     for machine, port in trouvees:
         lignes.append(f"  - machine: {machine}")
-        if port in CHEMINS_HTTP:
+        if port in CHEMINS_HTTP and (machine, port) not in forcer_tcp:
             lignes += ["    type: http", f"    port: {port}", f"    chemin: {CHEMINS_HTTP[port]}"]
         else:
             lignes += ["    type: tcp", f"    port: {port}"]
@@ -140,7 +140,11 @@ def main():
             if chemin.exists() and not args.force:
                 print(f"{chemin.name} existe déjà : utilise --force pour le remplacer.")
             else:
-                chemin.write_text(_yaml(trouvees), encoding="utf-8")
+                pages = [Sonde(m, "http", p, CHEMINS_HTTP[p]) for m, p in trouvees if p in CHEMINS_HTTP]
+                forcer = {(s.machine, s.port) for s, ok, _d, _ms in executer_toutes(pages) if not ok}
+                for machine, port in sorted(forcer):
+                    print(f"  {machine} port {port} : la page web ne répond pas correctement, sonde TCP à la place")
+                chemin.write_text(_yaml(trouvees, forcer), encoding="utf-8")
                 print(f"{chemin.name} écrit ({len(trouvees)} sondes).")
         return
 

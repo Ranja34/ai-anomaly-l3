@@ -47,3 +47,8 @@ ansible/inventory.ini
 data/
 ansible/playbooks/proposal_*.yml
 *.bak*
+
+# Données générées à l'exécution (historique, propositions, métriques)
+data/
+ansible/playbooks/proposal_*.yml
+*.bak*
