@@ -229,3 +229,45 @@ def dernier_incident_par_empreinte(empreinte):
             "SELECT * FROM incidents WHERE empreinte = ? ORDER BY cree_le DESC LIMIT 1", (empreinte,)
         ).fetchone()
     return dict(ligne) if ligne else None
+
+
+# ---------- Propositions de correction ----------
+
+CHAMPS_PROPOSITION = ("statut", "decide_le", "code_retour", "sortie")
+
+
+def creer_proposition(incident_id, tentative, machine, type_, contenu, sudo_requis, justification, risque):
+    proposition_id = uuid.uuid4().hex[:8]
+    with connexion() as c:
+        c.execute(
+            "INSERT INTO propositions (id, incident_id, tentative, machine, type, contenu, sudo_requis, "
+            "justification, risque, statut, cree_le) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?)",
+            (proposition_id, incident_id, tentative, machine, type_, contenu,
+             1 if sudo_requis else 0, justification, risque, maintenant_utc()),
+        )
+    return proposition_id
+
+
+def get_proposition(proposition_id):
+    with connexion() as c:
+        ligne = c.execute("SELECT * FROM propositions WHERE id = ?", (proposition_id,)).fetchone()
+    return dict(ligne) if ligne else None
+
+
+def decider_proposition(proposition_id, statut):
+    """Passe une proposition 'en_attente' à 'approuvee' ou 'refusee'. Retourne False si déjà traitée."""
+    with connexion() as c:
+        curseur = c.execute(
+            "UPDATE propositions SET statut = ?, decide_le = ? WHERE id = ? AND statut = 'en_attente'",
+            (statut, maintenant_utc(), proposition_id),
+        )
+        return curseur.rowcount > 0
+
+
+def mettre_a_jour_proposition(proposition_id, **champs):
+    champs = {k: v for k, v in champs.items() if k in CHAMPS_PROPOSITION}
+    if not champs:
+        return
+    colonnes = ", ".join(f"{k} = ?" for k in champs)
+    with connexion() as c:
+        c.execute(f"UPDATE propositions SET {colonnes} WHERE id = ?", (*champs.values(), proposition_id))

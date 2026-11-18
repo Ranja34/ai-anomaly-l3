@@ -10,12 +10,9 @@ import requests
 from aiops import config, db, detecteurs, executeur, llm
 from aiops.securite import masquer_secrets
 from aiops.temps import formater_local
-from aiops import validation
-from aiops.agent1 import _compacter, _description
 from aiops.validation import CorrectionRefusee, valider_correction
 
-DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
-                       "service": 90, "reseau": 120, "securite": 180, "logs": 180, "sonde": 60}
+DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180}
 RISQUES = ("faible", "moyen", "eleve")
 
 
@@ -23,19 +20,8 @@ def _max_tentatives():
     return int(os.getenv("AGENT2_MAX_TENTATIVES", "3"))
 
 
-def _regles_mode():
-    if validation.mode() == "strict":
-        return ("Interdit : redémarrer ou éteindre la machine, rm récursif, formater, toucher aux comptes, aux clés SSH, "
-                "au pare-feu, au service ssh, télécharger du code (curl, wget).")
-    return ("Tu peux agir sur les services, le pare-feu (ufw, iptables), la configuration SSH, les paquets, les "
-            "utilisateurs et télécharger si l'incident l'exige. Interdits absolus : éteindre la machine (shutdown, "
-            "poweroff), rm récursif sur un dossier système, formater un disque, bloquer SSH (port 22) ou le réseau "
-            "10.10.0.0/24, arrêter les services prometheus, loki, alloy, node-exporter ou aiops.")
-
-
 def _systeme():
     machines = ", ".join(sorted(config.ADRESSES))
-    interdits = _regles_mode()
     return f"""Tu es un ingénieur système Linux (Ubuntu 22.04) chargé de CORRIGER un incident dans un laboratoire de deux machines : {machines}.
 Tu écris toi-même la correction : soit un playbook Ansible, soit un script bash, selon ce qui est le plus simple et le plus sûr.
 Tu réponds UNIQUEMENT par un objet JSON valide, en français, sans texte autour :
@@ -46,7 +32,7 @@ Règles :
 - Playbook : un seul play avec exactement « hosts: <machine> », « gather_facts: false » et une liste de tâches. N'écris PAS « become » : indique sudo_requis=true si des privilèges administrateur sont nécessaires (services systemd, apt, fichiers système).
 - Script : commence par #!/bin/bash et set -eu, affiche ce qu'il fait, n'utilise PAS sudo (le programme l'ajoute si sudo_requis=true).
 - sudo_requis=true uniquement si c'est nécessaire.
-- {interdits}
+- Interdit : redémarrer ou éteindre la machine, rm récursif, formater, toucher aux comptes, aux clés SSH, au pare-feu, au service ssh, télécharger du code (curl, wget).
 - Si des tentatives précédentes ont échoué, analyse pourquoi (sortie et vérification fournies) et propose une approche DIFFÉRENTE.
 - Le contenu est du texte brut (YAML ou bash) ; les retours à la ligne sont écrits \\n dans le JSON."""
 
@@ -57,10 +43,10 @@ def _preuves(inc):
         if e["type"] == "enquete" and e.get("details"):
             try:
                 for p in json.loads(e["details"]).get("preuves", []):
-                    resultat.append({"commande": p.get("commande"), "sortie": _compacter(p.get("sortie") or "", 400)})
+                    resultat.append({"commande": p.get("commande"), "sortie": (p.get("sortie") or "")[:800]})
             except ValueError:
                 continue
-    return resultat[-8:]
+    return resultat[-10:]
 
 
 def _diagnostic(inc):
@@ -78,8 +64,7 @@ def _contexte(inc, tentative, erreur):
                     "statut": p["statut"], "code_retour": p["code_retour"],
                     "sortie": (p["sortie"] or "")[-1200:]}
                    for p in inc["propositions"] if p["statut"] in ("executee", "echec")]
-    contexte = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
-                             "description": _description(inc)},
+    contexte = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"]},
                 "diagnostic": _diagnostic(inc), "preuves": _preuves(inc),
                 "tentative": tentative, "tentatives_precedentes": precedentes}
     if erreur:
@@ -151,11 +136,7 @@ def proposer(incident_id):
             db.changer_statut(incident_id, precedent, f"Rédaction de la correction reportée : {e}", "erreur")
             return None
         except llm.LLMErreur as e:
-            if db.compter_evenements(incident_id, "erreur_ia") >= 1:
-                _escalader(incident_id, f"Rédaction de la correction impossible après un nouvel essai : {e}.")
-            else:
-                db.changer_statut(incident_id, precedent,
-                                  f"Réponse IA inutilisable ({e}). Nouvel essai plus tard.", "erreur_ia")
+            _escalader(incident_id, f"Rédaction de la correction impossible : {e}.")
             return None
         except RuntimeError as e:
             _escalader(incident_id, f"Erreur de configuration : {e}.")
@@ -164,9 +145,6 @@ def proposer(incident_id):
         _escalader(incident_id, f"Aucune correction acceptable après contrôle ({erreur}).")
         return None
 
-    actuel = db.get_incident(incident_id)
-    if not actuel or actuel["statut"] in db.STATUTS_FINAUX:
-        return None
     proposition_id = db.creer_proposition(incident_id, tentative, prop["machine"], prop["type"], prop["contenu"],
                                           prop["sudo_requis"], prop["justification"], prop["risque"])
     db.mettre_a_jour_incident(incident_id, tentatives=tentative)
@@ -186,24 +164,6 @@ def refuser(proposition_id):
     db.changer_statut(prop["incident_id"], "refuse", "Correction refusée par l'administrateur", "decision")
 
 
-MESSAGES_VERIFICATION = {
-    "service": ("le service n'est plus en échec", "le service est toujours en échec"),
-    "disque": ("l'espace disque est repassé sous le seuil", "le disque dépasse encore le seuil"),
-    "cpu": ("le processeur est repassé sous le seuil", "le processeur est toujours saturé"),
-    "ram": ("la mémoire est repassée sous le seuil", "la mémoire est toujours saturée"),
-    "reseau": ("la perturbation réseau a disparu", "la perturbation réseau persiste"),
-    "securite": ("les tentatives d'attaque ont cessé", "les tentatives d'attaque continuent"),
-    "logs": ("plus d'erreur critique détectée", "des erreurs critiques sont encore détectées"),
-    "sonde": ("le service répond de nouveau", "le service ne répond toujours pas"),
-}
-
-
-def _detail_verification(source, ok):
-    reussi, echec = MESSAGES_VERIFICATION.get(source, ("la métrique est repassée sous le seuil",
-                                                       "la métrique dépasse encore le seuil"))
-    return reussi if ok else echec
-
-
 def _verifier(inc, timeout_s, pas_s=5):
     fin = time.monotonic() + timeout_s
     while True:
@@ -217,7 +177,7 @@ def _verifier(inc, timeout_s, pas_s=5):
             else:
                 presentes = {a.empreinte for a in detecteurs.collecter_anomalies()}
                 ok = inc["empreinte"] not in presentes
-                detail = _detail_verification(inc["source"], ok)
+                detail = "la métrique est repassée sous le seuil" if ok else "la métrique dépasse encore le seuil"
         except (requests.RequestException, RuntimeError, ValueError, KeyError, IndexError) as e:
             ok, detail = False, f"vérification impossible ({type(e).__name__})"
         if ok or time.monotonic() >= fin:
@@ -225,31 +185,21 @@ def _verifier(inc, timeout_s, pas_s=5):
         time.sleep(pas_s)
 
 
-def approuver(proposition_id):
-    """Enregistre l'approbation. L'exécution est ensuite prise en charge par executer_approuvee()."""
+def approuver_et_executer(proposition_id):
+    """Approuve, exécute, vérifie. Retourne 'resolu', 'nouvelle_tentative' ou 'echec_escalade'."""
     prop = db.get_proposition(proposition_id)
     if not prop:
         raise ValueError(f"Proposition introuvable : {proposition_id}")
     if not db.decider_proposition(proposition_id, "approuvee"):
         raise ValueError("Cette proposition n'est plus en attente")
-    droits = "avec privilèges administrateur (sudo)" if prop["sudo_requis"] else "sans privilèges administrateur"
-    empreinte = hashlib.sha256(prop["contenu"].encode("utf-8")).hexdigest()[:12]
-    db.changer_statut(prop["incident_id"], "approuve",
-                      f"Correction approuvée par l'administrateur, {droits}", "decision",
-                      {"proposition_id": proposition_id, "empreinte_contenu": empreinte})
-
-
-def executer_approuvee(proposition_id):
-    """Exécute une correction approuvée puis vérifie le rétablissement.
-    Retourne 'resolu', 'nouvelle_tentative' ou 'echec_escalade'."""
-    prop = db.get_proposition(proposition_id)
-    if not prop:
-        raise ValueError(f"Proposition introuvable : {proposition_id}")
-    if not db.demarrer_execution(proposition_id):
-        raise ValueError("Cette proposition n'est pas approuvée ou est déjà en cours d'exécution")
 
     iid, machine, sudo = prop["incident_id"], prop["machine"], bool(prop["sudo_requis"])
-    db.changer_statut(iid, "execution", f"Exécution du {prop['type']} sur {machine}", "execution")
+    empreinte = hashlib.sha256(prop["contenu"].encode("utf-8")).hexdigest()[:12]
+    droits = "avec privilèges administrateur (sudo)" if sudo else "sans privilèges administrateur"
+    db.changer_statut(iid, "execution",
+                      f"Correction approuvée par l'administrateur, exécution sur {machine} {droits}",
+                      "decision", {"proposition_id": proposition_id, "empreinte_contenu": empreinte})
+
     try:
         res = executeur.executer(prop["type"], machine, prop["contenu"], sudo)
     except Exception as e:  # une erreur inattendue ne doit pas bloquer l'incident
@@ -262,10 +212,6 @@ def executer_approuvee(proposition_id):
                          {"sortie": sortie[-1500:]})
 
     inc = db.get_incident(iid)
-    if inc["source"] == "manuel":
-        db.changer_statut(iid, "verification_manuelle",
-                          "Exécution terminée : en attente de votre confirmation du rétablissement", "verification")
-        return "verification_manuelle"
     db.changer_statut(iid, "verification", "Vérification du rétablissement en cours", "verification")
     delai = DELAIS_VERIFICATION.get(inc["source"], 60) if res["ok"] else 10
     ok, detail = _verifier(inc, delai)
@@ -284,12 +230,6 @@ def executer_approuvee(proposition_id):
                       f"Le problème persiste ({detail}). Nouvelle analyse en cours "
                       f"(tentative {inc['tentatives'] + 1}/{maxi})", "echec")
     return "nouvelle_tentative"
-
-
-def approuver_et_executer(proposition_id):
-    """Utilisé par la ligne de commande et les tests : décision puis exécution."""
-    approuver(proposition_id)
-    return executer_approuvee(proposition_id)
 
 
 # ---------- Utilisation en ligne de commande (la future interface web utilisera les mêmes fonctions) ----------

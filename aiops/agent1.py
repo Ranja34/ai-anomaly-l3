@@ -78,6 +78,13 @@ def _diagnostic_mock(inc):
             "service_concerne": None, "verification_recommandee": "Contrôler la métrique concernée."}
 
 
+def _gravite_finale(proposee, mesuree):
+    """La gravité n'est jamais abaissée en dessous de celle mesurée par le détecteur."""
+    if proposee not in GRAVITES:
+        return mesuree
+    return max(proposee, mesuree, key=GRAVITES.index)
+
+
 def _normaliser(rep, inc):
     if not rep.get("resume") or not rep.get("cause_probable"):
         raise llm.LLMErreur("Diagnostic IA incomplet")
@@ -85,7 +92,7 @@ def _normaliser(rep, inc):
     preuves = rep.get("preuves") if isinstance(rep.get("preuves"), list) else []
     return {
         "resume": str(rep["resume"]),
-        "gravite": rep.get("gravite") if rep.get("gravite") in GRAVITES else inc["gravite"],
+        "gravite": _gravite_finale(rep.get("gravite"), inc["gravite"]),
         "cause_probable": str(rep["cause_probable"]),
         "confiance": rep.get("confiance") or "moyenne",
         "preuves": [str(p) for p in preuves][:6],
