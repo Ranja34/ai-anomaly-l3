@@ -164,8 +164,8 @@ def extraire_json(texte):
     raise LLMErreur("Réponse IA invalide : JSON introuvable ou tronqué")
 
 
-def _attendre_intervalle(minimum):
-    dernier = db.dernier_appel_ia()
+def _attendre_intervalle(minimum, fournisseur=None):
+    dernier = db.dernier_appel_ia_fournisseur(fournisseur)
     if not dernier:
         return
     ecoule = (datetime.now(timezone.utc) - datetime.fromisoformat(dernier)).total_seconds()
@@ -201,11 +201,11 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
     f, m = r["fournisseur"], r["modele"]
     derniere_erreur = "aucune"
     for essai in range(1, r["tentatives"] + 2):
-        if db.nombre_appels_ia_aujourdhui() >= r["max_appels_jour"]:
+        if db.appels_ia_fournisseur(r["fournisseur"]) >= r["max_appels_jour"]:
             raise QuotaDepasse(f"Limite locale de {r['max_appels_jour']} appels IA par jour atteinte")
-        if db.nombre_appels_ia_depuis(60) >= r["max_appels_heure"]:
+        if db.appels_ia_fournisseur(r["fournisseur"], 60) >= r["max_appels_heure"]:
             raise QuotaDepasse(f"Limite de {r['max_appels_heure']} appels IA par heure atteinte")
-        _attendre_intervalle(r["intervalle_min"])
+        _attendre_intervalle(r["intervalle_min"], r["fournisseur"])
         if r["fournisseur"] == "groq":
             _attendre_jetons((len(systeme) + len(utilisateur)) / 3 + r["max_tokens"])
 
