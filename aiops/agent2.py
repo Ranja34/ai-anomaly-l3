@@ -12,7 +12,8 @@ from aiops.securite import masquer_secrets
 from aiops.temps import formater_local
 from aiops.validation import CorrectionRefusee, valider_correction
 
-DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180}
+DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
+                       "service": 90, "reseau": 120, "securite": 180, "logs": 180}
 RISQUES = ("faible", "moyen", "eleve")
 
 

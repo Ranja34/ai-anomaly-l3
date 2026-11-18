@@ -19,6 +19,7 @@ class TestDetecteurReseau(unittest.TestCase):
             return []
         with mock.patch.object(detecteurs, "_requete", side_effect=fausse), \
              mock.patch.object(detecteurs, "_sonde_ping", return_value=ping), \
+             mock.patch.object(detecteurs, "_requete_loki", return_value=[]), \
              mock.patch.object(detecteurs.socket, "gethostname", return_value="frappe-staging"):
             return [a.empreinte for a in detecteurs.collecter_anomalies()]
 
