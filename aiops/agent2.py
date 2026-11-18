@@ -185,21 +185,31 @@ def _verifier(inc, timeout_s, pas_s=5):
         time.sleep(pas_s)
 
 
-def approuver_et_executer(proposition_id):
-    """Approuve, exécute, vérifie. Retourne 'resolu', 'nouvelle_tentative' ou 'echec_escalade'."""
+def approuver(proposition_id):
+    """Enregistre l'approbation. L'exécution est ensuite prise en charge par executer_approuvee()."""
     prop = db.get_proposition(proposition_id)
     if not prop:
         raise ValueError(f"Proposition introuvable : {proposition_id}")
     if not db.decider_proposition(proposition_id, "approuvee"):
         raise ValueError("Cette proposition n'est plus en attente")
+    droits = "avec privilèges administrateur (sudo)" if prop["sudo_requis"] else "sans privilèges administrateur"
+    empreinte = hashlib.sha256(prop["contenu"].encode("utf-8")).hexdigest()[:12]
+    db.changer_statut(prop["incident_id"], "approuve",
+                      f"Correction approuvée par l'administrateur, {droits}", "decision",
+                      {"proposition_id": proposition_id, "empreinte_contenu": empreinte})
+
+
+def executer_approuvee(proposition_id):
+    """Exécute une correction approuvée puis vérifie le rétablissement.
+    Retourne 'resolu', 'nouvelle_tentative' ou 'echec_escalade'."""
+    prop = db.get_proposition(proposition_id)
+    if not prop:
+        raise ValueError(f"Proposition introuvable : {proposition_id}")
+    if not db.demarrer_execution(proposition_id):
+        raise ValueError("Cette proposition n'est pas approuvée ou est déjà en cours d'exécution")
 
     iid, machine, sudo = prop["incident_id"], prop["machine"], bool(prop["sudo_requis"])
-    empreinte = hashlib.sha256(prop["contenu"].encode("utf-8")).hexdigest()[:12]
-    droits = "avec privilèges administrateur (sudo)" if sudo else "sans privilèges administrateur"
-    db.changer_statut(iid, "execution",
-                      f"Correction approuvée par l'administrateur, exécution sur {machine} {droits}",
-                      "decision", {"proposition_id": proposition_id, "empreinte_contenu": empreinte})
-
+    db.changer_statut(iid, "execution", f"Exécution du {prop['type']} sur {machine}", "execution")
     try:
         res = executeur.executer(prop["type"], machine, prop["contenu"], sudo)
     except Exception as e:  # une erreur inattendue ne doit pas bloquer l'incident
@@ -230,6 +240,12 @@ def approuver_et_executer(proposition_id):
                       f"Le problème persiste ({detail}). Nouvelle analyse en cours "
                       f"(tentative {inc['tentatives'] + 1}/{maxi})", "echec")
     return "nouvelle_tentative"
+
+
+def approuver_et_executer(proposition_id):
+    """Utilisé par la ligne de commande et les tests : décision puis exécution."""
+    approuver(proposition_id)
+    return executer_approuvee(proposition_id)
 
 
 # ---------- Utilisation en ligne de commande (la future interface web utilisera les mêmes fonctions) ----------

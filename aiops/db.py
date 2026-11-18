@@ -88,9 +88,19 @@ def connexion():
         conn.close()
 
 
+SCHEMA_ETAT = """
+CREATE TABLE IF NOT EXISTS etat (
+    cle TEXT PRIMARY KEY,
+    valeur TEXT NOT NULL,
+    mis_a_jour_le TEXT NOT NULL
+);
+"""
+
+
 def init_db():
     with connexion() as c:
         c.executescript(SCHEMA)
+        c.executescript(SCHEMA_ETAT)
 
 
 def _ajouter_evenement(c, incident_id, type_evenement, message, details=None):
@@ -271,3 +281,41 @@ def mettre_a_jour_proposition(proposition_id, **champs):
     colonnes = ", ".join(f"{k} = ?" for k in champs)
     with connexion() as c:
         c.execute(f"UPDATE propositions SET {colonnes} WHERE id = ?", (*champs.values(), proposition_id))
+
+
+# ---------- Fonctions pour l'orchestrateur ----------
+
+def set_etat(cle, valeur):
+    with connexion() as c:
+        c.execute(
+            "INSERT INTO etat (cle, valeur, mis_a_jour_le) VALUES (?, ?, ?) "
+            "ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur, mis_a_jour_le = excluded.mis_a_jour_le",
+            (cle, str(valeur), maintenant_utc()),
+        )
+
+
+def get_etat(cle):
+    with connexion() as c:
+        ligne = c.execute("SELECT valeur, mis_a_jour_le FROM etat WHERE cle = ?", (cle,)).fetchone()
+    return dict(ligne) if ligne else None
+
+
+def propositions_par_statut(statut):
+    with connexion() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM propositions WHERE statut = ? ORDER BY cree_le", (statut,))]
+
+
+def demarrer_execution(proposition_id):
+    """Passe 'approuvee' à 'en_cours'. Retourne False si déjà prise en charge (évite une double exécution)."""
+    with connexion() as c:
+        curseur = c.execute(
+            "UPDATE propositions SET statut = 'en_cours' WHERE id = ? AND statut = 'approuvee'", (proposition_id,))
+        return curseur.rowcount > 0
+
+
+def annuler_propositions_en_attente(incident_id):
+    with connexion() as c:
+        c.execute(
+            "UPDATE propositions SET statut = 'annulee', decide_le = ? WHERE incident_id = ? AND statut = 'en_attente'",
+            (maintenant_utc(), incident_id))

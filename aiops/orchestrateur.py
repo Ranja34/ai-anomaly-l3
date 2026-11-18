@@ -1,8 +1,6 @@
-"""Orchestrateur : trois fils indépendants (détection, IA, exécution) qui détectent, diagnostiquent,
-proposent, exécutent les corrections approuvées et vérifient le rétablissement."""
+"""Orchestrateur : service permanent qui détecte, diagnostique, propose, exécute les corrections approuvées et vérifie."""
 import os
 import signal
-import threading
 import time
 import traceback
 
@@ -21,10 +19,9 @@ def journal(message):
 class Orchestrateur:
     def __init__(self, detecteur=None):
         self.detecteur = detecteur or detecteurs.Detecteur()
-        self.pause_ia_s = int(os.getenv("IA_PAUSE_QUOTA_S", "120"))
+        self.pause_ia_s = int(os.getenv("IA_PAUSE_QUOTA_S", "600"))
         self.pause_ia_jusqua = 0.0
         self.erreurs = {}
-        self.verrou = threading.Lock()
         self.arret = False
 
     # ----- Reprise après un arrêt brutal ou un redémarrage -----
@@ -50,8 +47,8 @@ class Orchestrateur:
                     db.changer_statut(iid, "nouvelle_tentative",
                                       "Exécution interrompue par un redémarrage du service : nouvelle analyse", "info")
 
-    # ----- Fil 1 : détection (jamais bloquée par l'IA) -----
-    def detecter(self):
+    # ----- Un passage complet -----
+    def cycle(self):
         db.set_etat("battement", maintenant_utc())
         detection_ok = True
         try:
@@ -64,6 +61,7 @@ class Orchestrateur:
             journal(f"Prometheus injoignable ou réponse invalide : {e}")
         if detection_ok:
             self._cloturer_obsoletes()
+        self._traiter()
 
     def _cloturer_obsoletes(self):
         """Un problème qui a disparu avant la fin du traitement est clos automatiquement."""
@@ -72,32 +70,22 @@ class Orchestrateur:
             return
         for statut in STATUTS_A_SURVEILLER:
             for inc in db.lister_incidents(statut=statut):
-                if inc["source"] != "manuel" and inc["empreinte"] not in presentes:
+                if inc["empreinte"] not in presentes:
                     db.annuler_propositions_en_attente(inc["id"])
                     db.changer_statut(inc["id"], "resolu",
                                       "Le problème a disparu avant la fin du traitement "
                                       "(rétablissement hors procédure)", "resolu")
                     journal(f"Incident {inc['id']} clos : le problème a disparu de lui-même")
 
-    # ----- Utilisé par les tests : un passage complet, dans un seul fil -----
-    def cycle(self):
-        self.detecter()
-        self._traiter()
-
     def _traiter(self):
-        self._traiter_executions()
-        self._traiter_ia()
-
-    # ----- Fil 3 : exécution des corrections approuvées (aucun appel IA) -----
-    def _traiter_executions(self):
+        # 1. Exécuter les corrections approuvées (ne consomme aucun appel IA)
         for prop in db.propositions_par_statut("approuvee"):
             journal(f"Exécution de la correction {prop['id']} (incident {prop['incident_id']}) sur {prop['machine']}")
             resultat = self._securise(prop["incident_id"], lambda p=prop: agent2.executer_approuvee(p["id"]))
             if resultat:
                 journal(f"Incident {prop['incident_id']} : {resultat}")
 
-    # ----- Fil 2 : étapes qui utilisent l'IA (suspendues si le quota est atteint) -----
-    def _traiter_ia(self):
+        # 2. Étapes qui utilisent l'IA (suspendues si le quota est atteint)
         if time.monotonic() < self.pause_ia_jusqua:
             return
         for inc in reversed(db.lister_incidents(statut="ouvert")):
@@ -124,8 +112,7 @@ class Orchestrateur:
         try:
             return fonction()
         except Exception as e:  # une erreur sur un incident ne doit jamais arrêter le service
-            with self.verrou:
-                n = self.erreurs[incident_id] = self.erreurs.get(incident_id, 0) + 1
+            n = self.erreurs[incident_id] = self.erreurs.get(incident_id, 0) + 1
             journal(f"Erreur interne sur l'incident {incident_id} ({n}/3) : {type(e).__name__}: {e}")
             traceback.print_exc()
             if n >= 3:
@@ -135,18 +122,6 @@ class Orchestrateur:
             return None
 
 
-def _boucle(orchestrateur, fonction, intervalle, nom):
-    while not orchestrateur.arret:
-        debut = time.monotonic()
-        try:
-            fonction()
-        except Exception as e:
-            journal(f"Erreur inattendue dans le fil « {nom} » : {type(e).__name__}: {e}")
-            traceback.print_exc()
-        while not orchestrateur.arret and time.monotonic() - debut < intervalle:
-            time.sleep(0.5)
-
-
 def main():
     db.init_db()
     orchestrateur = Orchestrateur()
@@ -154,21 +129,19 @@ def main():
         signal.signal(signal_arret, lambda *_: setattr(orchestrateur, "arret", True))
 
     r = llm._reglages()
-    intervalle = orchestrateur.detecteur.r["intervalle"]
-    journal(f"Orchestrateur démarré (moteur IA : {r['fournisseur']}, modèle : {r['modele']}) ; "
-            f"détection toutes les {intervalle} s, IA et exécutions surveillées chaque seconde")
+    journal(f"Orchestrateur démarré (moteur IA : {r['fournisseur']}, modèle : {r['modele']}, "
+            f"quota : {r['max_appels_jour']} appels/jour)")
     orchestrateur.reprise()
-    taches = (("détection", orchestrateur.detecter, intervalle),
-              ("ia", orchestrateur._traiter_ia, 1),
-              ("exécution", orchestrateur._traiter_executions, 1))
-    fils = [threading.Thread(target=_boucle, args=(orchestrateur, f, i, n), name=n, daemon=True)
-            for n, f, i in taches]
-    for fil in fils:
-        fil.start()
+    intervalle = orchestrateur.detecteur.r["intervalle"]
     while not orchestrateur.arret:
-        time.sleep(1)
-    for fil in fils:
-        fil.join(timeout=50)
+        debut = time.monotonic()
+        try:
+            orchestrateur.cycle()
+        except Exception as e:
+            journal(f"Erreur inattendue dans le cycle : {type(e).__name__}: {e}")
+            traceback.print_exc()
+        while not orchestrateur.arret and time.monotonic() - debut < intervalle:
+            time.sleep(1)
     journal("Orchestrateur arrêté proprement")
 
 
