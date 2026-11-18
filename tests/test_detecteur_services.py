@@ -12,9 +12,7 @@ def fausse_requete(requete):
 
 class TestDetecteurServices(unittest.TestCase):
     def test_service_en_echec_detecte(self):
-        with mock.patch.object(detecteurs, "_requete", side_effect=fausse_requete), \
-             mock.patch.object(detecteurs, "_sonde_ping", return_value=(0.0, 0.5)), \
-             mock.patch.object(detecteurs, "_requete_loki", return_value=[]):
+        with mock.patch.object(detecteurs, "_requete", side_effect=fausse_requete):
             anomalies = detecteurs.collecter_anomalies()
         self.assertEqual(len(anomalies), 1)
         a = anomalies[0]
@@ -23,9 +21,7 @@ class TestDetecteurServices(unittest.TestCase):
 
     def test_service_ignore(self):
         r = {**detecteurs._reglages(), "services_ignores": {"nginx.service"}}
-        with mock.patch.object(detecteurs, "_requete", side_effect=fausse_requete), \
-             mock.patch.object(detecteurs, "_sonde_ping", return_value=(0.0, 0.5)), \
-             mock.patch.object(detecteurs, "_requete_loki", return_value=[]):
+        with mock.patch.object(detecteurs, "_requete", side_effect=fausse_requete):
             self.assertEqual(detecteurs.collecter_anomalies(r), [])
 
 

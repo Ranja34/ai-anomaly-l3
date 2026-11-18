@@ -36,6 +36,8 @@ def _reglages():
         "conf_ram_s": int(os.getenv("CONFIRM_RAM_S", "120")),
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
+        "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "60")),
+        "services_ignores": {s.strip() for s in os.getenv("SERVICES_IGNORES", "").split(",") if s.strip()},
     }
 
 
@@ -109,6 +111,19 @@ def collecter_anomalies(r=None):
                 f"Disque presque plein sur {m} ({point})",
                 f"Partition {point} remplie à {v:.1f} % (seuil : {r['seuil_disque']:.0f} %).",
                 r["conf_disque_s"]))
+
+    requete_services = 'node_systemd_unit_state{state="failed",name=~".+[.]service"} == 1'
+    for s in _requete(requete_services):
+        nom = s["metric"].get("name", "?")
+        if nom in r["services_ignores"]:
+            continue
+        inst = s["metric"]["instance"]
+        m = _machine(inst)
+        anomalies.append(Anomalie(
+            f"service:{inst}:{nom}", m, "service", "haute",
+            f"Service {nom} en échec sur {m}",
+            f"Le service {nom} est dans l'état « failed » sur {m} (arrêt anormal ou erreur au démarrage).",
+            r["conf_service_s"]))
 
     return anomalies
 
