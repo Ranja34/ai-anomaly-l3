@@ -3,7 +3,6 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
 
 from aiops import config
 from aiops.temps import debut_jour_utc, maintenant_utc
@@ -89,22 +88,9 @@ def connexion():
         conn.close()
 
 
-SCHEMA_ETAT = """
-CREATE TABLE IF NOT EXISTS etat (
-    cle TEXT PRIMARY KEY,
-    valeur TEXT NOT NULL,
-    mis_a_jour_le TEXT NOT NULL
-);
-"""
-
-
 def init_db():
     with connexion() as c:
         c.executescript(SCHEMA)
-        c.executescript(SCHEMA_ETAT)
-        colonnes = {r["name"] for r in c.execute("PRAGMA table_info(appels_ia)")}
-        if "tokens" not in colonnes:
-            c.execute("ALTER TABLE appels_ia ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0")
 
 
 def _ajouter_evenement(c, incident_id, type_evenement, message, details=None):
@@ -146,13 +132,9 @@ def incident_actif_par_empreinte(empreinte):
     return dict(ligne) if ligne else None
 
 
-def changer_statut(incident_id, statut, message=None, type_evenement="info", details=None, forcer=False):
+def changer_statut(incident_id, statut, message=None, type_evenement="info", details=None):
     now = maintenant_utc()
     with connexion() as c:
-        if not forcer:
-            ligne = c.execute("SELECT statut FROM incidents WHERE id = ?", (incident_id,)).fetchone()
-            if ligne and ligne["statut"] in STATUTS_FINAUX:
-                return False
         c.execute(
             "UPDATE incidents SET statut = ?, mis_a_jour_le = ?, "
             "resolu_le = CASE WHEN ? = 'resolu' THEN ? ELSE resolu_le END WHERE id = ?",
@@ -160,7 +142,6 @@ def changer_statut(incident_id, statut, message=None, type_evenement="info", det
         )
         if message:
             _ajouter_evenement(c, incident_id, type_evenement, message, details)
-        return True
 
 
 def mettre_a_jour_incident(incident_id, **champs):
@@ -223,12 +204,11 @@ def supprimer_historique():
 
 # ---------- Compteur d'appels IA (jamais effacé par la suppression de l'historique) ----------
 
-def enregistrer_appel_ia(fournisseur, modele, objet, succes, erreur=None, tokens=0):
+def enregistrer_appel_ia(fournisseur, modele, objet, succes, erreur=None):
     with connexion() as c:
         c.execute(
-            "INSERT INTO appels_ia (horodatage, fournisseur, modele, objet, succes, erreur, tokens) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (maintenant_utc(), fournisseur, modele, objet, 1 if succes else 0, erreur, tokens),
+            "INSERT INTO appels_ia (horodatage, fournisseur, modele, objet, succes, erreur) VALUES (?, ?, ?, ?, ?, ?)",
+            (maintenant_utc(), fournisseur, modele, objet, 1 if succes else 0, erreur),
         )
 
 
@@ -240,128 +220,4 @@ def nombre_appels_ia_aujourdhui():
 def dernier_appel_ia():
     with connexion() as c:
         ligne = c.execute("SELECT horodatage FROM appels_ia ORDER BY id DESC LIMIT 1").fetchone()
-    return ligne[0] if ligne else None
-
-
-def dernier_incident_par_empreinte(empreinte):
-    with connexion() as c:
-        ligne = c.execute(
-            "SELECT * FROM incidents WHERE empreinte = ? ORDER BY cree_le DESC LIMIT 1", (empreinte,)
-        ).fetchone()
-    return dict(ligne) if ligne else None
-
-
-# ---------- Propositions de correction ----------
-
-CHAMPS_PROPOSITION = ("statut", "decide_le", "code_retour", "sortie")
-
-
-def creer_proposition(incident_id, tentative, machine, type_, contenu, sudo_requis, justification, risque):
-    proposition_id = uuid.uuid4().hex[:8]
-    with connexion() as c:
-        c.execute(
-            "INSERT INTO propositions (id, incident_id, tentative, machine, type, contenu, sudo_requis, "
-            "justification, risque, statut, cree_le) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?)",
-            (proposition_id, incident_id, tentative, machine, type_, contenu,
-             1 if sudo_requis else 0, justification, risque, maintenant_utc()),
-        )
-    return proposition_id
-
-
-def get_proposition(proposition_id):
-    with connexion() as c:
-        ligne = c.execute("SELECT * FROM propositions WHERE id = ?", (proposition_id,)).fetchone()
-    return dict(ligne) if ligne else None
-
-
-def decider_proposition(proposition_id, statut):
-    """Passe une proposition 'en_attente' à 'approuvee' ou 'refusee'. Retourne False si déjà traitée."""
-    with connexion() as c:
-        curseur = c.execute(
-            "UPDATE propositions SET statut = ?, decide_le = ? WHERE id = ? AND statut = 'en_attente'",
-            (statut, maintenant_utc(), proposition_id),
-        )
-        return curseur.rowcount > 0
-
-
-def mettre_a_jour_proposition(proposition_id, **champs):
-    champs = {k: v for k, v in champs.items() if k in CHAMPS_PROPOSITION}
-    if not champs:
-        return
-    colonnes = ", ".join(f"{k} = ?" for k in champs)
-    with connexion() as c:
-        c.execute(f"UPDATE propositions SET {colonnes} WHERE id = ?", (*champs.values(), proposition_id))
-
-
-# ---------- Fonctions pour l'orchestrateur ----------
-
-def set_etat(cle, valeur):
-    with connexion() as c:
-        c.execute(
-            "INSERT INTO etat (cle, valeur, mis_a_jour_le) VALUES (?, ?, ?) "
-            "ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur, mis_a_jour_le = excluded.mis_a_jour_le",
-            (cle, str(valeur), maintenant_utc()),
-        )
-
-
-def get_etat(cle):
-    with connexion() as c:
-        ligne = c.execute("SELECT valeur, mis_a_jour_le FROM etat WHERE cle = ?", (cle,)).fetchone()
-    return dict(ligne) if ligne else None
-
-
-def propositions_par_statut(statut):
-    with connexion() as c:
-        return [dict(r) for r in c.execute(
-            "SELECT * FROM propositions WHERE statut = ? ORDER BY cree_le", (statut,))]
-
-
-def demarrer_execution(proposition_id):
-    """Passe 'approuvee' à 'en_cours'. Retourne False si déjà prise en charge (évite une double exécution)."""
-    with connexion() as c:
-        curseur = c.execute(
-            "UPDATE propositions SET statut = 'en_cours' WHERE id = ? AND statut = 'approuvee'", (proposition_id,))
-        return curseur.rowcount > 0
-
-
-def annuler_propositions_en_attente(incident_id):
-    with connexion() as c:
-        c.execute(
-            "UPDATE propositions SET statut = 'annulee', decide_le = ? WHERE incident_id = ? AND statut = 'en_attente'",
-            (maintenant_utc(), incident_id))
-
-
-def nombre_appels_ia_depuis(minutes):
-    limite = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
-    with connexion() as c:
-        return c.execute("SELECT COUNT(*) FROM appels_ia WHERE horodatage >= ?", (limite,)).fetchone()[0]
-
-
-def compter_evenements(incident_id, type_evenement):
-    with connexion() as c:
-        return c.execute("SELECT COUNT(*) FROM evenements WHERE incident_id = ? AND type = ?",
-                         (incident_id, type_evenement)).fetchone()[0]
-
-
-def tokens_ia_aujourdhui():
-    with connexion() as c:
-        return c.execute("SELECT COALESCE(SUM(tokens), 0) FROM appels_ia WHERE horodatage >= ?",
-                         (debut_jour_utc(),)).fetchone()[0]
-
-
-def appels_ia_fournisseur(fournisseur, minutes=None):
-    """Nombre d'appels IA d'un fournisseur : aujourd'hui, ou durant les N dernières minutes."""
-    if minutes is None:
-        depuis = debut_jour_utc()
-    else:
-        depuis = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
-    with connexion() as c:
-        return c.execute("SELECT COUNT(*) FROM appels_ia WHERE fournisseur = ? AND horodatage >= ?",
-                         (fournisseur, depuis)).fetchone()[0]
-
-
-def dernier_appel_ia_fournisseur(fournisseur):
-    with connexion() as c:
-        ligne = c.execute("SELECT horodatage FROM appels_ia WHERE fournisseur = ? ORDER BY id DESC LIMIT 1",
-                          (fournisseur,)).fetchone()
     return ligne[0] if ligne else None
