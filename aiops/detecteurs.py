@@ -39,6 +39,7 @@ def _reglages():
         "conf_ram_s": int(os.getenv("CONFIRM_RAM_S", "120")),
         "conf_disque_s": int(os.getenv("CONFIRM_DISQUE_S", "0")),
         "cooldown_s": int(os.getenv("DETECT_COOLDOWN_S", "600")),
+        "cooldown_escalade_s": int(os.getenv("DETECT_COOLDOWN_ESCALADE_S", "3600")),
         "conf_service_s": int(os.getenv("CONFIRM_SERVICE_S", "60")),
         "conf_reseau_s": int(os.getenv("CONFIRM_RESEAU_S", "60")),
         "interfaces": os.getenv("RESEAU_INTERFACES", "ens.*|eth.*|enp.*"),
@@ -278,7 +279,8 @@ class Detecteur:
         if not dernier or dernier["statut"] not in ("refuse", "echec_escalade"):
             return False
         ecoule = (datetime.now(timezone.utc) - datetime.fromisoformat(dernier["mis_a_jour_le"])).total_seconds()
-        return ecoule < self.r["cooldown_s"]
+        limite = self.r["cooldown_escalade_s"] if dernier["statut"] == "echec_escalade" else self.r["cooldown_s"]
+        return ecoule < limite
 
     def cycle(self):
         """Un passage de détection. Retourne la liste des incidents ouverts pendant ce passage."""

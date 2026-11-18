@@ -10,6 +10,7 @@ import requests
 from aiops import config, db, detecteurs, executeur, llm
 from aiops.securite import masquer_secrets
 from aiops.temps import formater_local
+from aiops import validation
 from aiops.validation import CorrectionRefusee, valider_correction
 
 DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
@@ -21,8 +22,19 @@ def _max_tentatives():
     return int(os.getenv("AGENT2_MAX_TENTATIVES", "3"))
 
 
+def _regles_mode():
+    if validation.mode() == "strict":
+        return ("Interdit : redémarrer ou éteindre la machine, rm récursif, formater, toucher aux comptes, aux clés SSH, "
+                "au pare-feu, au service ssh, télécharger du code (curl, wget).")
+    return ("Tu peux agir sur les services, le pare-feu (ufw, iptables), la configuration SSH, les paquets, les "
+            "utilisateurs et télécharger si l'incident l'exige. Interdits absolus : éteindre la machine (shutdown, "
+            "poweroff), rm récursif sur un dossier système, formater un disque, bloquer SSH (port 22) ou le réseau "
+            "10.10.0.0/24, arrêter les services prometheus, loki, alloy, node-exporter ou aiops.")
+
+
 def _systeme():
     machines = ", ".join(sorted(config.ADRESSES))
+    interdits = _regles_mode()
     return f"""Tu es un ingénieur système Linux (Ubuntu 22.04) chargé de CORRIGER un incident dans un laboratoire de deux machines : {machines}.
 Tu écris toi-même la correction : soit un playbook Ansible, soit un script bash, selon ce qui est le plus simple et le plus sûr.
 Tu réponds UNIQUEMENT par un objet JSON valide, en français, sans texte autour :
@@ -33,7 +45,7 @@ Règles :
 - Playbook : un seul play avec exactement « hosts: <machine> », « gather_facts: false » et une liste de tâches. N'écris PAS « become » : indique sudo_requis=true si des privilèges administrateur sont nécessaires (services systemd, apt, fichiers système).
 - Script : commence par #!/bin/bash et set -eu, affiche ce qu'il fait, n'utilise PAS sudo (le programme l'ajoute si sudo_requis=true).
 - sudo_requis=true uniquement si c'est nécessaire.
-- Interdit : redémarrer ou éteindre la machine, rm récursif, formater, toucher aux comptes, aux clés SSH, au pare-feu, au service ssh, télécharger du code (curl, wget).
+- {interdits}
 - Si des tentatives précédentes ont échoué, analyse pourquoi (sortie et vérification fournies) et propose une approche DIFFÉRENTE.
 - Le contenu est du texte brut (YAML ou bash) ; les retours à la ligne sont écrits \\n dans le JSON."""
 

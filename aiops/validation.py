@@ -1,5 +1,12 @@
-"""Validation statique des corrections écrites par l'IA (2e ligne de défense, après l'approbation humaine)."""
+"""Validation statique des corrections écrites par l'IA.
+
+Deux modes (variable AGENT2_MODE) :
+- « labo » (défaut) : seulement les gestes irréversibles ou qui détruiraient le laboratoire ;
+- « strict » : liste noire complète (à réactiver pour le durcissement).
+"""
+import os
 import re
+import socket
 
 import yaml
 
@@ -10,12 +17,33 @@ class CorrectionRefusee(Exception):
 
 LONGUEUR_MAX = 6000
 
-INTERDITS = [
-    (r"\brm\s+(?:-\S*\s+)*(?:-\w*[rR]\w*|--recursive|--no-preserve-root)(?:\s|$)", "suppression récursive"),
-    (r"\bmkfs(?:\.\w+)?\b|\bwipefs\b|\bparted\b|\bfdisk\b", "formatage ou partitionnement de disque"),
-    (r"\bdd\b[^\n]*\bof=", "écriture brute sur un disque"),
-    (r"\b(?:shutdown|reboot|poweroff|halt)\b|\binit\s+[06]\b|systemctl\s+(?:reboot|poweroff|halt|kexec)",
-     "arrêt ou redémarrage de la machine"),
+# Toujours appliqué : la correction doit s'exécuter sur la machine prévue
+STRUCTURE = [
+    (r"delegate_to|local_action|connection\s*:\s*local|ansible_connection|ansible_host|ansible_become",
+     "exécution hors de la machine cible"),
+]
+
+# Mode labo : gestes irréversibles ou destructeurs pour le laboratoire
+CATASTROPHES = [
+    (r"\brm\s+(?:-\S*\s+)*(?:-\w*[rR]\w*|--recursive)\s+(?:-\S+\s+)*(?:--\s+)?"
+     r"(?:/|/\*|/etc|/boot|/usr|/bin|/sbin|/lib\w*|/var|/home|/root|/dev|/proc|/sys|~)/?(?:\s|$)",
+     "suppression récursive d'un dossier système"),
+    (r"--no-preserve-root", "suppression de la racine"),
+    (r"\bmkfs(?:\.\w+)?\b|\bwipefs\b", "formatage de disque"),
+    (r"\bdd\b[^\n]*\bof=/dev/|>\s*/dev/(?:sd|nvme|vd|xvd)", "écriture brute sur un disque"),
+    (r":\(\)\s*\{", "fork bomb"),
+    (r"chmod\s+-R\s+[0-7]{3,4}\s+/(?:\s|$)", "permissions sur toute la racine"),
+    (r"\b(?:shutdown|poweroff|halt)\b|\binit\s+0\b|systemctl\s+(?:poweroff|halt)", "extinction de la machine"),
+    (r"(?:stop|disable|mask|kill)\S*\s+aiops", "arrêt de l'orchestrateur"),
+]
+
+REDEMARRAGE = (r"\breboot\b|systemctl\s+(?:reboot|kexec)",
+               "redémarrage de la machine qui héberge l'orchestrateur")
+
+# Mode strict : liste noire complète
+STRICT = [
+    (r"\bparted\b|\bfdisk\b", "partitionnement de disque"),
+    (r"\breboot\b", "redémarrage de la machine"),
     (r"\b(?:passwd|chpasswd|useradd|userdel|usermod|groupadd|visudo)\b|/etc/(?:sudoers|shadow|passwd|group)",
      "gestion des comptes et des privilèges"),
     (r"authorized_keys|\.ssh\b|id_ed25519|id_rsa|sshd?_config", "accès SSH"),
@@ -25,12 +53,23 @@ INTERDITS = [
     (r"\bcurl\b|\bwget\b|\bnc\b|\bncat\b|\bget_url\b|\buri\s*:", "téléchargement ou connexion réseau sortante"),
     (r"chmod\s+(?:-R\s+)?[0-7]?777|chown\s+-R", "permissions étendues"),
     (r"/dev/(?:sd|nvme|vd|xvd)|/boot\b|/etc/fstab|/etc/netplan|/etc/ssh", "périphériques, démarrage ou réseau"),
-    (r":\(\)\s*\{", "fork bomb"),
     (r"\bapt(?:-get)?\s+(?:remove|purge|autoremove)", "désinstallation de paquets"),
-    (r"\b(?:ansible\.builtin\.)?(?:user|group|reboot|authorized_key|mount|filesystem)\s*:", "module Ansible interdit"),
-    (r"delegate_to|local_action|connection\s*:\s*local|ansible_connection|ansible_host|ansible_become",
-     "exécution hors de la machine cible"),
+    (r"(?m)^\s*(?:-\s+)?(?:ansible\.builtin\.)?(?:user|group|reboot|authorized_key|mount|filesystem)\s*:\s*(?:$|\S+=)",
+     "module Ansible interdit"),
 ]
+
+
+def mode():
+    return "strict" if os.getenv("AGENT2_MODE", "labo").strip().lower() == "strict" else "labo"
+
+
+def _motifs(machine):
+    motifs = list(STRUCTURE) + list(CATASTROPHES)
+    if mode() == "strict":
+        motifs += STRICT
+    elif machine == socket.gethostname():
+        motifs.append(REDEMARRAGE)
+    return motifs
 
 
 def valider_correction(type_, machine, contenu):
@@ -42,7 +81,7 @@ def valider_correction(type_, machine, contenu):
     if len(contenu) > LONGUEUR_MAX:
         raise CorrectionRefusee(f"contenu trop long (maximum {LONGUEUR_MAX} caractères)")
 
-    for motif, raison in INTERDITS:
+    for motif, raison in _motifs(machine):
         if re.search(motif, contenu, re.IGNORECASE):
             raise CorrectionRefusee(f"élément interdit détecté : {raison}")
 
