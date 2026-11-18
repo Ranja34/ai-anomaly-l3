@@ -19,130 +19,18 @@ class QuotaDepasse(LLMErreur):
     """Limite d'appels atteinte (locale ou côté fournisseur)."""
 
 
-CONSIGNE_REPONSE = "\n\nRéponds directement par l'objet JSON dans le contenu de ton message. N'appelle aucun outil ni aucune fonction."
-
-
-def _recuperer_appel_outil(rep):
-    """Quand le modèle tente un « appel d'outil », Groq refuse (HTTP 400) mais renvoie sa génération :
-    la réponse JSON voulue s'y trouve souvent. Retourne ce dictionnaire, ou None si inutilisable."""
-    try:
-        generation = rep.json()["error"]["failed_generation"]
-    except (ValueError, KeyError, TypeError):
-        return None
-    try:
-        donnees = extraire_json(generation) if isinstance(generation, str) else generation
-    except LLMErreur:
-        return None
-    if not isinstance(donnees, dict):
-        return None
-    arguments = donnees.get("arguments")
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except ValueError:
-            return None
-    if isinstance(arguments, dict) and any(c in arguments for c in ("action", "resume", "type", "contenu")):
-        return arguments
-    return None
-
-
-def _noter_limites(rep):
-    """Mémorise les limites annoncées par le fournisseur (consultables ensuite dans la base)."""
-    try:
-        entetes = {k.lower(): v for k, v in (getattr(rep, "headers", None) or {}).items()
-                   if k.lower().startswith("x-ratelimit") or k.lower() == "retry-after"}
-        if entetes:
-            db.set_etat("limites_ia", json.dumps(entetes))
-    except Exception:  # l'observation ne doit jamais gêner un appel
-        pass
-
-
-def _detail_429(rep):
-    try:
-        return str(rep.json()["error"]["message"])[:200]
-    except (ValueError, KeyError, TypeError, AttributeError):
-        return "limite du fournisseur"
-
-
-def _attente_429(rep):
-    """Délai conseillé par le fournisseur (en secondes), s'il est indiqué."""
-    valeur = (getattr(rep, "headers", None) or {}).get("retry-after")
-    try:
-        return float(valeur)
-    except (TypeError, ValueError):
-        return None
-
-
-def _tokens_utilises(rep):
-    try:
-        return int(rep.json()["usage"]["total_tokens"])
-    except (ValueError, KeyError, TypeError, AttributeError):
-        return 0
-
-
-def _attendre_jetons(besoin):
-    """Attend, si nécessaire, que la fenêtre de tokens par minute du fournisseur permette l'appel."""
-    etat = db.get_etat("limites_ia")
-    if not etat:
-        return
-    try:
-        entetes = json.loads(etat["valeur"])
-        limite = float(entetes["x-ratelimit-limit-tokens"])
-        reste = float(entetes["x-ratelimit-remaining-tokens"])
-        ecoule = (datetime.now(timezone.utc) - datetime.fromisoformat(etat["mis_a_jour_le"])).total_seconds()
-    except (ValueError, KeyError, TypeError):
-        return
-    debit = limite / 60
-    disponible = min(limite, reste + max(0.0, ecoule) * debit)
-    besoin = min(besoin, limite)
-    if disponible >= besoin:
-        return
-    time.sleep(min(60.0, (besoin - disponible) / debit + 0.5))
-
-
-MOTEURS = ("groq", "ollama", "mock")
-
-
-def moteur_choisi():
-    """Moteur IA actif : choix fait depuis l'interface (base de données), sinon variable LLM_PROVIDER."""
-    try:
-        etat = db.get_etat("moteur_ia")
-    except Exception:
-        etat = None
-    if etat and etat["valeur"] in MOTEURS:
-        return etat["valeur"]
-    return os.getenv("LLM_PROVIDER", "mock").lower()
-
-
 def _reglages():
-    r = _reglages_env()
-    r["fournisseur"] = moteur_choisi()
-    if r["fournisseur"] == "ollama":
-        r.update({
-            "modele": os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
-            "url": os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1").rstrip("/"),
-            "cle": "",
-            "max_appels_jour": 10 ** 9, "max_appels_heure": 10 ** 9, "intervalle_min": 0.0,
-            "timeout": int(os.getenv("OLLAMA_TIMEOUT_S", "300")),
-            "mode_json": os.getenv("LLM_JSON_MODE", "true").lower() in ("1", "true", "oui"),
-        })
-    return r
-
-
-def _reglages_env():
     return {
         "fournisseur": os.getenv("LLM_PROVIDER", "mock").lower(),
         "modele": os.getenv("LLM_MODEL", "openai/gpt-oss-20b"),
         "url": os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/"),
         "cle": os.getenv("GROQ_API_KEY", ""),
         "max_appels_jour": int(os.getenv("LLM_MAX_APPELS_JOUR", "60")),
-        "max_appels_heure": int(os.getenv("LLM_MAX_APPELS_HEURE", "20")),
-        "intervalle_min": float(os.getenv("LLM_INTERVALLE_MIN_S", "1")),
+        "intervalle_min": float(os.getenv("LLM_INTERVALLE_MIN_S", "5")),
         "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2500")),
         "tentatives": int(os.getenv("LLM_TENTATIVES", "2")),
         "effort": os.getenv("LLM_REASONING_EFFORT", "low"),
         "timeout": int(os.getenv("LLM_TIMEOUT_S", "90")),
-        "attente_429_max": float(os.getenv("LLM_ATTENTE_429_MAX_S", "40")),
         "mode_json": os.getenv("LLM_JSON_MODE", "false").lower() in ("1", "true", "oui"),
     }
 
@@ -164,8 +52,8 @@ def extraire_json(texte):
     raise LLMErreur("Réponse IA invalide : JSON introuvable ou tronqué")
 
 
-def _attendre_intervalle(minimum, fournisseur=None):
-    dernier = db.dernier_appel_ia_fournisseur(fournisseur)
+def _attendre_intervalle(minimum):
+    dernier = db.dernier_appel_ia()
     if not dernier:
         return
     ecoule = (datetime.now(timezone.utc) - datetime.fromisoformat(dernier)).total_seconds()
@@ -173,11 +61,9 @@ def _attendre_intervalle(minimum, fournisseur=None):
         time.sleep(minimum - ecoule)
 
 
-def demander_json(systeme, utilisateur, objet="", reponse_mock=None, max_tokens=None):
+def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
     """Interroge le modèle et retourne un dict. Lève LLMErreur ou QuotaDepasse."""
     r = _reglages()
-    if max_tokens:
-        r["max_tokens"] = min(int(max_tokens), r["max_tokens"])
     if r["fournisseur"] == "mock":
         return reponse_mock if reponse_mock is not None else {"mock": True}
     if r["fournisseur"] == "groq" and not r["cle"]:
@@ -189,7 +75,7 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None, max_tokens=
     corps = {
         "model": r["modele"],
         "messages": [
-            {"role": "system", "content": systeme + CONSIGNE_REPONSE},
+            {"role": "system", "content": systeme},
             {"role": "user", "content": utilisateur},
         ],
         "temperature": 0.2,
@@ -203,13 +89,9 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None, max_tokens=
     f, m = r["fournisseur"], r["modele"]
     derniere_erreur = "aucune"
     for essai in range(1, r["tentatives"] + 2):
-        if db.appels_ia_fournisseur(r["fournisseur"]) >= r["max_appels_jour"]:
+        if db.nombre_appels_ia_aujourdhui() >= r["max_appels_jour"]:
             raise QuotaDepasse(f"Limite locale de {r['max_appels_jour']} appels IA par jour atteinte")
-        if db.appels_ia_fournisseur(r["fournisseur"], 60) >= r["max_appels_heure"]:
-            raise QuotaDepasse(f"Limite de {r['max_appels_heure']} appels IA par heure atteinte")
-        _attendre_intervalle(r["intervalle_min"], r["fournisseur"])
-        if r["fournisseur"] == "groq":
-            _attendre_jetons((len(systeme) + len(utilisateur)) / 3 + r["max_tokens"])
+        _attendre_intervalle(r["intervalle_min"])
 
         try:
             rep = requests.post(f"{r['url']}/chat/completions", headers=entetes,
@@ -220,28 +102,13 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None, max_tokens=
             time.sleep(2 * essai)
             continue
 
-        _noter_limites(rep)
         if rep.status_code == 429:
-            detail = _detail_429(rep)
-            db.enregistrer_appel_ia(f, m, objet, False, f"429 {detail}"[:300])
-            attente = _attente_429(rep)
-            if attente is not None and attente <= r["attente_429_max"] and essai <= r["tentatives"]:
-                time.sleep(attente + 1)
-                derniere_erreur = f"429 {detail}"
-                continue
-            raise QuotaDepasse(f"Limite du fournisseur atteinte (HTTP 429) : {detail}")
+            db.enregistrer_appel_ia(f, m, objet, False, "429 limite du fournisseur")
+            raise QuotaDepasse("Limite du fournisseur atteinte (HTTP 429)")
         if rep.status_code >= 500:
             derniere_erreur = f"HTTP {rep.status_code}"
             db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)
             time.sleep(2 * essai)
-            continue
-        if rep.status_code == 400 and "tool_use_failed" in rep.text:
-            recupere = _recuperer_appel_outil(rep)
-            if recupere is not None:
-                db.enregistrer_appel_ia(f, m, objet, True)
-                return recupere
-            derniere_erreur = "le modèle a tenté d'appeler un outil"
-            db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)
             continue
         if rep.status_code != 200:
             db.enregistrer_appel_ia(f, m, objet, False, f"HTTP {rep.status_code}")
@@ -266,7 +133,7 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None, max_tokens=
             db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)
             continue
 
-        db.enregistrer_appel_ia(f, m, objet, True, tokens=_tokens_utilises(rep))
+        db.enregistrer_appel_ia(f, m, objet, True)
         return donnees
 
     raise LLMErreur(f"Échec après {r['tentatives'] + 1} tentatives : {derniere_erreur}")
