@@ -209,7 +209,8 @@ def api_relancer(incident_id):
     if not inc or inc["statut"] != "echec_escalade":
         return jsonify({"erreur": "Seul un incident en échec peut être relancé"}), 409
     db.mettre_a_jour_incident(incident_id, tentatives=0)
-    db.changer_statut(incident_id, "ouvert", "Relancé par l'administrateur : nouvelle analyse complète", "info")
+    db.changer_statut(incident_id, "ouvert", "Relancé par l'administrateur : nouvelle analyse complète", "info",
+                      forcer=True)
     return _ok()
 
 

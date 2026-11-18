@@ -146,9 +146,13 @@ def incident_actif_par_empreinte(empreinte):
     return dict(ligne) if ligne else None
 
 
-def changer_statut(incident_id, statut, message=None, type_evenement="info", details=None):
+def changer_statut(incident_id, statut, message=None, type_evenement="info", details=None, forcer=False):
     now = maintenant_utc()
     with connexion() as c:
+        if not forcer:
+            ligne = c.execute("SELECT statut FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if ligne and ligne["statut"] in STATUTS_FINAUX:
+                return False
         c.execute(
             "UPDATE incidents SET statut = ?, mis_a_jour_le = ?, "
             "resolu_le = CASE WHEN ? = 'resolu' THEN ? ELSE resolu_le END WHERE id = ?",
@@ -156,6 +160,7 @@ def changer_statut(incident_id, statut, message=None, type_evenement="info", det
         )
         if message:
             _ajouter_evenement(c, incident_id, type_evenement, message, details)
+        return True
 
 
 def mettre_a_jour_incident(incident_id, **champs):

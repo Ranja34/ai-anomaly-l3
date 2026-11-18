@@ -11,7 +11,7 @@ GRAVITES = ("faible", "moyenne", "haute", "critique")
 
 
 def _max_tours():
-    return int(os.getenv("AGENT1_MAX_TOURS", "4"))
+    return int(os.getenv("AGENT1_MAX_TOURS", "3"))
 
 
 def _systeme(maxi):
@@ -26,7 +26,8 @@ Règles : pipes, grep, awk, sort, head, tail autorisés ; aucune modification (p
 
 Dès que tu as assez de preuves :
 {{"action": "conclure", "resume": "2 phrases claires", "gravite": "faible|moyenne|haute|critique", "cause_probable": "...", "confiance": "faible|moyenne|haute", "preuves": ["fait observé 1", "fait observé 2"], "service_concerne": "nom du service ou null", "machine": "machine concernée", "verification_recommandee": "comment vérifier que c'est réglé"}}
-Ne conclus jamais que « les logs ne sont pas disponibles » sans avoir essayé journalctl ET une lecture avec sudo. Si l'incident est un faux positif ou ne demande aucune action, dis-le dans le résumé."""
+Ne conclus jamais que « les logs ne sont pas disponibles » sans avoir essayé journalctl ET une lecture avec sudo. Si l'incident est un faux positif ou ne demande aucune action, dis-le dans le résumé.
+Si les preuves déjà fournies suffisent, conclus IMMÉDIATEMENT (action = conclure) : n'enquête que s'il manque un fait essentiel."""
 
 
 def _commandes_standard(inc):
@@ -102,12 +103,21 @@ def _executer_liste(commandes):
     return preuves
 
 
-def _budget(preuves, max_total=6000):
-    """Limite la taille envoyée à l'IA : les anciennes sorties sont raccourcies."""
-    if sum(len(p["sortie"]) for p in preuves) <= max_total:
-        return preuves
-    n = len(preuves)
-    return [{**p, "sortie": p["sortie"][:400] if i < n - 6 else p["sortie"]} for i, p in enumerate(preuves)]
+def _compacter(sortie, limite):
+    if len(sortie) <= limite:
+        return sortie
+    moitie = limite // 2
+    return sortie[:moitie] + "\n[...]\n" + sortie[-moitie:]
+
+
+def _budget(preuves, par_sortie=600, total=3500):
+    """Réduit ce qui est envoyé à l'IA (le texte complet reste dans la chronologie)."""
+    reduit = [{**p, "sortie": _compacter(p["sortie"], par_sortie)} for p in preuves]
+    if sum(len(p["sortie"]) for p in reduit) > total:
+        n = len(reduit)
+        reduit = [{**p, "sortie": _compacter(p["sortie"], 250) if i < n - 4 else p["sortie"]}
+                  for i, p in enumerate(reduit)]
+    return reduit
 
 
 def _diagnostic_mock(inc):
@@ -169,7 +179,8 @@ def _boucle_ia(inc, preuves):
         if dernier:
             message["consigne"] = "Tu dois conclure maintenant (action = conclure)."
         rep = llm.demander_json(_systeme(maxi), json.dumps(message, ensure_ascii=False),
-                                objet=f"diagnostic {inc['id']} t{tour}", reponse_mock=_diagnostic_mock(inc))
+                                objet=f"diagnostic {inc['id']} t{tour}", reponse_mock=_diagnostic_mock(inc),
+                                max_tokens=1500)
         if rep.get("action") in ("commandes", "enqueter") and not dernier:
             demandes = []
             for c in (rep.get("commandes") or [])[:4]:
