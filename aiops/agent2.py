@@ -11,6 +11,7 @@ from aiops import config, db, detecteurs, executeur, llm
 from aiops.securite import masquer_secrets
 from aiops.temps import formater_local
 from aiops import validation
+from aiops.agent1 import _description
 from aiops.validation import CorrectionRefusee, valider_correction
 
 DELAIS_VERIFICATION = {"up": 90, "disque": 60, "cpu": 180, "ram": 180,
@@ -77,7 +78,8 @@ def _contexte(inc, tentative, erreur):
                     "statut": p["statut"], "code_retour": p["code_retour"],
                     "sortie": (p["sortie"] or "")[-1200:]}
                    for p in inc["propositions"] if p["statut"] in ("executee", "echec")]
-    contexte = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"]},
+    contexte = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
+                             "description": _description(inc)},
                 "diagnostic": _diagnostic(inc), "preuves": _preuves(inc),
                 "tentative": tentative, "tentatives_precedentes": precedentes}
     if erreur:
@@ -239,6 +241,10 @@ def executer_approuvee(proposition_id):
                          {"sortie": sortie[-1500:]})
 
     inc = db.get_incident(iid)
+    if inc["source"] == "manuel":
+        db.changer_statut(iid, "verification_manuelle",
+                          "Exécution terminée : en attente de votre confirmation du rétablissement", "verification")
+        return "verification_manuelle"
     db.changer_statut(iid, "verification", "Vérification du rétablissement en cours", "verification")
     delai = DELAIS_VERIFICATION.get(inc["source"], 60) if res["ok"] else 10
     ok, detail = _verifier(inc, delai)

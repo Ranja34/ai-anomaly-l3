@@ -70,7 +70,7 @@ class Orchestrateur:
             return
         for statut in STATUTS_A_SURVEILLER:
             for inc in db.lister_incidents(statut=statut):
-                if inc["empreinte"] not in presentes:
+                if inc["source"] != "manuel" and inc["empreinte"] not in presentes:
                     db.annuler_propositions_en_attente(inc["id"])
                     db.changer_statut(inc["id"], "resolu",
                                       "Le problème a disparu avant la fin du traitement "

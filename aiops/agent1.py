@@ -149,13 +149,22 @@ def _normaliser(rep, inc):
     }
 
 
+def _description(inc):
+    """Texte décrivant l'incident : signalement de l'administrateur ou mesure du détecteur."""
+    for e in inc["evenements"]:
+        if e["type"] in ("signalement", "mesure"):
+            return e["message"][:800]
+    return ""
+
+
 def _boucle_ia(inc, preuves):
     maxi = _max_tours()
     forcer = False
     for tour in range(1, maxi + 1):
         dernier = forcer or tour == maxi
         message = {"incident": {"titre": inc["titre"], "machine": inc["machine"], "type": inc["source"],
-                                "gravite_initiale": inc["gravite"]},
+                                "gravite_initiale": inc["gravite"],
+                                "description": _description(inc)},
                    "preuves": _budget(preuves), "tour": f"{tour}/{maxi}"}
         if dernier:
             message["consigne"] = "Tu dois conclure maintenant (action = conclure)."
