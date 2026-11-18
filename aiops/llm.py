@@ -46,6 +46,33 @@ def _recuperer_appel_outil(rep):
     return None
 
 
+def _noter_limites(rep):
+    """Mémorise les limites annoncées par le fournisseur (consultables ensuite dans la base)."""
+    try:
+        entetes = {k.lower(): v for k, v in (getattr(rep, "headers", None) or {}).items()
+                   if k.lower().startswith("x-ratelimit") or k.lower() == "retry-after"}
+        if entetes:
+            db.set_etat("limites_ia", json.dumps(entetes))
+    except Exception:  # l'observation ne doit jamais gêner un appel
+        pass
+
+
+def _detail_429(rep):
+    try:
+        return str(rep.json()["error"]["message"])[:200]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return "limite du fournisseur"
+
+
+def _attente_429(rep):
+    """Délai conseillé par le fournisseur (en secondes), s'il est indiqué."""
+    valeur = (getattr(rep, "headers", None) or {}).get("retry-after")
+    try:
+        return float(valeur)
+    except (TypeError, ValueError):
+        return None
+
+
 def _reglages():
     return {
         "fournisseur": os.getenv("LLM_PROVIDER", "mock").lower(),
@@ -59,6 +86,7 @@ def _reglages():
         "tentatives": int(os.getenv("LLM_TENTATIVES", "2")),
         "effort": os.getenv("LLM_REASONING_EFFORT", "low"),
         "timeout": int(os.getenv("LLM_TIMEOUT_S", "90")),
+        "attente_429_max": float(os.getenv("LLM_ATTENTE_429_MAX_S", "40")),
         "mode_json": os.getenv("LLM_JSON_MODE", "false").lower() in ("1", "true", "oui"),
     }
 
@@ -132,9 +160,16 @@ def demander_json(systeme, utilisateur, objet="", reponse_mock=None):
             time.sleep(2 * essai)
             continue
 
+        _noter_limites(rep)
         if rep.status_code == 429:
-            db.enregistrer_appel_ia(f, m, objet, False, "429 limite du fournisseur")
-            raise QuotaDepasse("Limite du fournisseur atteinte (HTTP 429)")
+            detail = _detail_429(rep)
+            db.enregistrer_appel_ia(f, m, objet, False, f"429 {detail}"[:300])
+            attente = _attente_429(rep)
+            if attente is not None and attente <= r["attente_429_max"] and essai <= r["tentatives"]:
+                time.sleep(attente + 1)
+                derniere_erreur = f"429 {detail}"
+                continue
+            raise QuotaDepasse(f"Limite du fournisseur atteinte (HTTP 429) : {detail}")
         if rep.status_code >= 500:
             derniere_erreur = f"HTTP {rep.status_code}"
             db.enregistrer_appel_ia(f, m, objet, False, derniere_erreur)

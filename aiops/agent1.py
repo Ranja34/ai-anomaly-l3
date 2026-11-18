@@ -166,7 +166,10 @@ def _boucle_ia(inc, preuves):
             for c in (rep.get("commandes") or [])[:4]:
                 if isinstance(c, dict) and c.get("commande"):
                     machine = c.get("machine") if c.get("machine") in config.ADRESSES else inc["machine"]
-                    demandes.append((machine, str(c["commande"]), bool(c.get("sudo"))))
+                    commande, sudo = str(c["commande"]).strip(), bool(c.get("sudo"))
+                    if commande.startswith("sudo "):
+                        commande, sudo = commande[5:].lstrip(), True
+                    demandes.append((machine, commande, sudo))
             if not demandes:
                 forcer = True
                 continue

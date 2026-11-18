@@ -19,7 +19,7 @@ def journal(message):
 class Orchestrateur:
     def __init__(self, detecteur=None):
         self.detecteur = detecteur or detecteurs.Detecteur()
-        self.pause_ia_s = int(os.getenv("IA_PAUSE_QUOTA_S", "600"))
+        self.pause_ia_s = int(os.getenv("IA_PAUSE_QUOTA_S", "120"))
         self.pause_ia_jusqua = 0.0
         self.erreurs = {}
         self.arret = False
