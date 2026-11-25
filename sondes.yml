@@ -23,15 +23,8 @@ sondes:
     chemin: /api/etat
   - machine: frappe-staging
     type: http
-    port: 8080
-    chemin: /
-  - machine: frappe-staging
-    type: http
     port: 9090
     chemin: /-/ready
-  - machine: runner-devops
-    type: tcp
-    port: 22
   - machine: runner-devops
     type: http
     port: 80
